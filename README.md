@@ -15,6 +15,7 @@ with no external dependencies and no build step, served via GitHub Pages.
 | 03 | Angry Birds Web | [Demo](https://l67077955-cyber.github.io/vibe-coding-showcase/angry-birds/) | A single-file *Angry Birds* clone featuring an inlined physics engine and multiple levels |
 | 04 | Absolute Cinema — Pure SVG Redraw | [Demo](https://l67077955-cyber.github.io/vibe-coding-showcase/absolute-cinema/) | The *ABSOLUTE CINEMA* meme rebuilt entirely from hand-coded inline SVG shapes — no bitmap, no pixel tracing — with blue engineering callouts that explain each drawing technique on hover; a view toggle swaps in the original reference image for comparison |
 | 05 | Beauty Ranking Curves — Jev 1.13 | [Demo](https://l67077955-cyber.github.io/vibe-coding-showcase/beauty-ranking/) | 3,460 public figures from the *Pantheon* dataset rated for perceived beauty by the Jev 1.13 (System One) model over 4,000 name-only queries, visualized as per-gender ranking curves with source-colored points and means |
+| 06 | Teddy Nights — FNAF-style Survival Horror | [Demo](https://l67077955-cyber.github.io/vibe-coding-showcase/teddy-nights/) | A *Five Nights at Freddy's*-inspired survival horror game with doors, lights, 11 cameras, a power meter and the original's movement-opportunity AI; all visuals drawn procedurally on Canvas and all audio synthesized with WebAudio |
 
 ## Principles
 
