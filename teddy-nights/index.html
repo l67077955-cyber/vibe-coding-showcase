@@ -1,0 +1,1000 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>玩具熊的午夜后宫</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  canvas{display:block;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);cursor:default}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+'use strict';
+// ============================================================ 基础
+const W = 1280, H = 720, WORLD = 1600, HOUR = 60;
+const FNUM = '"VT323", "Courier New", monospace';
+const FCN = '"PingFang SC","Microsoft YaHei","Noto Sans CJK SC","Source Han Sans SC",sans-serif';
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let scale = 1, dpr = 1;
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  scale = Math.min(innerWidth / W, innerHeight / H);
+  cv.style.width = W * scale + 'px'; cv.style.height = H * scale + 'px';
+  cv.width = Math.round(W * scale * dpr); cv.height = Math.round(H * scale * dpr);
+}
+addEventListener('resize', resize); resize();
+
+const rnd = (a, b) => a + Math.random() * (b - a);
+const ri = (a, b) => Math.floor(rnd(a, b + 1));
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function rr(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+function ell(x, y, rx, ry, fill, rot = 0) { ctx.beginPath(); ctx.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2); ctx.fillStyle = fill; ctx.fill(); }
+function poly(pts, fill) { ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]); ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); }
+function txt(s, x, y, size, col, align = 'left', font = FCN, weight = '') { ctx.font = `${weight} ${size}px ${font}`; ctx.fillStyle = col; ctx.textAlign = align; ctx.textBaseline = 'alphabetic'; ctx.fillText(s, x, y); }
+function star(x, y, r, c) { ctx.fillStyle = c; ctx.beginPath(); for (let i = 0; i < 10; i++) { const a = i * Math.PI / 5 - Math.PI / 2, q = i % 2 ? r * 0.45 : r; ctx.lineTo(x + Math.cos(a) * q, y + Math.sin(a) * q); } ctx.fill(); }
+function srand(seed) { return () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }; }
+
+// ============================================================ 存档
+const SAVE = { night: 1, beat5: false, beat6: false, custom: [1, 3, 3, 1] };
+try { Object.assign(SAVE, JSON.parse(localStorage.getItem('teddy_nights_save') || '{}')); } catch (e) {}
+function save() { try { localStorage.setItem('teddy_nights_save', JSON.stringify(SAVE)); } catch (e) {} }
+
+// ============================================================ 预生成素材
+const NOISE = [];
+for (let k = 0; k < 6; k++) {
+  const c = document.createElement('canvas'); c.width = 320; c.height = 180;
+  const x = c.getContext('2d'), d = x.createImageData(320, 180);
+  for (let i = 0; i < d.data.length; i += 4) { const v = Math.random() * 255 | 0; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255; }
+  x.putImageData(d, 0, 0); NOISE.push(c);
+}
+function drawStatic(a) {
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = Math.min(1, a); ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(NOISE[(Math.random() * NOISE.length) | 0], 0, 0, W, H); ctx.restore();
+}
+const scanCanvas = document.createElement('canvas'); scanCanvas.width = 2; scanCanvas.height = 4;
+{ const x = scanCanvas.getContext('2d'); x.fillStyle = 'rgba(0,0,0,0.35)'; x.fillRect(0, 0, 2, 1); }
+let SCAN = null;
+
+const R = srand(1987);
+const STARS = Array.from({ length: 70 }, () => ({ x: 70 + R() * 1140, y: 30 + R() * 420, s: 4 + R() * 9 }));
+const CURTAIN_STARS = Array.from({ length: 30 }, () => ({ x: R(), y: R(), s: 4 + R() * 6 }));
+const DRAWINGS = Array.from({ length: 18 }, () => ({ x: R() * 1220, y: 50 + R() * 190, w: 50 + R() * 40, h: 40 + R() * 30, r: (R() - 0.5) * 0.25, c: ['#e33', '#33e', '#2a2', '#e90', '#a3c'][Math.floor(R() * 5)], k: Math.floor(R() * 3) }));
+function kidDrawing(d) {
+  ctx.save(); ctx.translate(d.x, d.y); ctx.rotate(d.r);
+  ctx.fillStyle = '#cfc9b8'; ctx.fillRect(0, 0, d.w, d.h);
+  ctx.strokeStyle = d.c; ctx.lineWidth = 3; ctx.beginPath();
+  if (d.k === 0) { ctx.arc(d.w / 2, d.h * 0.35, d.h * 0.18, 0, 7); ctx.moveTo(d.w / 2, d.h * 0.53); ctx.lineTo(d.w / 2, d.h * 0.85); ctx.moveTo(d.w * 0.3, d.h * 0.65); ctx.lineTo(d.w * 0.7, d.h * 0.65); }
+  else if (d.k === 1) { ctx.arc(d.w * 0.35, d.h * 0.5, d.h * 0.25, 0, 7); ctx.moveTo(d.w * 0.25, d.h * 0.25); ctx.lineTo(d.w * 0.2, d.h * 0.05); ctx.moveTo(d.w * 0.45, d.h * 0.25); ctx.lineTo(d.w * 0.5, d.h * 0.05); }
+  else { for (let i = 0; i < 3; i++) { ctx.moveTo(d.w * (0.2 + i * 0.25), d.h * 0.8); ctx.lineTo(d.w * (0.2 + i * 0.25), d.h * 0.4); ctx.arc(d.w * (0.2 + i * 0.25), d.h * 0.32, 6, Math.PI / 2, Math.PI * 2.5); } }
+  ctx.stroke(); ctx.restore();
+}
+
+// ============================================================ 音频（全部 WebAudio 合成）
+const AU = {
+  ctx: null, loops: null,
+  init() {
+    if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
+    try {
+      const C = new (window.AudioContext || window.webkitAudioContext)();
+      this.ctx = C; this.out = C.createGain(); this.out.gain.value = 0.75; this.out.connect(C.destination);
+      const len = C.sampleRate * 2;
+      const b = C.createBuffer(1, len, C.sampleRate), d = b.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      this.white = b;
+      const b2 = C.createBuffer(1, len, C.sampleRate), d2 = b2.getChannelData(0); let l = 0;
+      for (let i = 0; i < len; i++) { const w = Math.random() * 2 - 1; l = (l + 0.02 * w) / 1.02; d2[i] = l * 3.5; }
+      this.brown = b2;
+    } catch (e) { this.ctx = null; }
+  },
+  env(g, t, a, peak, d) { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(Math.max(peak, 0.0002), t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + d); },
+  noise({ dur = 0.3, type = 'lowpass', freq = 1000, q = 1, gain = 0.3, attack = 0.005, brown = false, when = 0 } = {}) {
+    if (!this.ctx) return; const C = this.ctx, t = C.currentTime + when;
+    const s = C.createBufferSource(); s.buffer = brown ? this.brown : this.white;
+    const f = C.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+    const g = C.createGain(); this.env(g, t, attack, gain, dur);
+    s.connect(f).connect(g).connect(this.out); s.start(t, Math.random() * 0.4); s.stop(t + attack + dur + 0.05);
+  },
+  tone({ freq = 440, dur = 0.3, type = 'sine', gain = 0.2, attack = 0.005, slide = null, when = 0 } = {}) {
+    if (!this.ctx) return; const C = this.ctx, t = C.currentTime + when;
+    const o = C.createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, t);
+    if (slide) o.frequency.exponentialRampToValueAtTime(slide, t + attack + dur);
+    const g = C.createGain(); this.env(g, t, attack, gain, dur);
+    o.connect(g).connect(this.out); o.start(t); o.stop(t + attack + dur + 0.05);
+  },
+  startLoops() {
+    if (!this.ctx || this.loops) return; const C = this.ctx, L = {};
+    L.fan = C.createBufferSource(); L.fan.buffer = this.brown; L.fan.loop = true;
+    const lp = C.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 520;
+    L.fanG = C.createGain(); L.fanG.gain.value = 0.16; L.fan.connect(lp).connect(L.fanG).connect(this.out); L.fan.start();
+    L.hum = C.createOscillator(); L.hum.frequency.value = 58; const hg = C.createGain(); hg.gain.value = 0.025; L.hum.connect(hg).connect(this.out); L.hum.start();
+    L.buzz = C.createOscillator(); L.buzz.type = 'sawtooth'; L.buzz.frequency.value = 120;
+    const bp = C.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1400; bp.Q.value = 2;
+    L.buzzG = C.createGain(); L.buzzG.gain.value = 0; L.buzz.connect(bp).connect(L.buzzG).connect(this.out); L.buzz.start();
+    this.loops = L;
+  },
+  stopLoops() {
+    if (!this.loops) return; const L = this.loops;
+    try { L.fan.stop(); L.hum.stop(); L.buzz.stop(); } catch (e) {}
+    this.loops = null;
+  },
+  setLight(on) { if (this.loops) this.loops.buzzG.gain.setTargetAtTime(on ? 0.05 : 0, this.ctx.currentTime, 0.02); },
+  door() { this.noise({ dur: 0.35, freq: 380, gain: 0.7, brown: true }); this.tone({ freq: 95, slide: 40, dur: 0.25, type: 'triangle', gain: 0.5 }); this.tone({ freq: 520, dur: 0.08, type: 'square', gain: 0.04, when: 0.03 }); },
+  click() { this.tone({ freq: 1800, dur: 0.03, type: 'square', gain: 0.05 }); },
+  error() { this.tone({ freq: 140, dur: 0.25, type: 'square', gain: 0.08 }); },
+  camUp() { this.noise({ dur: 0.25, type: 'bandpass', freq: 1500, q: 0.7, gain: 0.15 }); this.tone({ freq: 300, slide: 900, dur: 0.15, gain: 0.05 }); },
+  camDown() { this.noise({ dur: 0.2, type: 'bandpass', freq: 1200, q: 0.7, gain: 0.12 }); this.tone({ freq: 900, slide: 300, dur: 0.15, gain: 0.05 }); },
+  camSwitch() { this.noise({ dur: 0.12, type: 'highpass', freq: 2000, gain: 0.12 }); this.tone({ freq: 1200, dur: 0.04, type: 'square', gain: 0.03 }); },
+  staticBurst() { this.noise({ dur: 0.7, type: 'bandpass', freq: 2500, q: 0.5, gain: 0.2 }); },
+  steps(n = 3, gap = 0.45, gain = 0.25) { for (let i = 0; i < n; i++) { this.noise({ when: i * gap, dur: 0.14, freq: 220, brown: true, gain }); this.tone({ when: i * gap, freq: 65, slide: 45, dur: 0.1, type: 'triangle', gain: gain * 0.6 }); } },
+  foxyRun() { for (let i = 0; i < 12; i++) { const g = 0.15 + i * 0.05; this.noise({ when: i * 0.19, dur: 0.1, freq: 260, brown: true, gain: g }); this.tone({ when: i * 0.19, freq: 70, slide: 45, dur: 0.08, type: 'triangle', gain: g * 0.5 }); } },
+  knock() { for (let i = 0; i < 4; i++) { this.noise({ when: i * 0.2, dur: 0.18, freq: 300, brown: true, gain: 0.8 }); this.tone({ when: i * 0.2, freq: 80, slide: 40, dur: 0.15, type: 'triangle', gain: 0.4 }); } },
+  stinger() { this.tone({ freq: 55, dur: 1.3, type: 'sawtooth', gain: 0.22, attack: 0.01 }); this.tone({ freq: 58.3, dur: 1.3, type: 'sawtooth', gain: 0.18, attack: 0.01 }); this.noise({ dur: 0.9, freq: 300, gain: 0.25, brown: true }); },
+  laugh() { for (let i = 0; i < 3; i++) this.tone({ when: i * 0.24, freq: 170 - i * 12, slide: 110, dur: 0.17, type: 'triangle', gain: 0.12 }); },
+  groan() { this.tone({ freq: 75, slide: 48, dur: 1.8, type: 'sawtooth', gain: 0.06, attack: 0.3 }); },
+  clang() { const f = rnd(700, 1500); this.tone({ freq: f, dur: 0.45, type: 'square', gain: 0.035 }); this.tone({ freq: f * 1.47, dur: 0.35, type: 'square', gain: 0.02 }); this.noise({ dur: 0.2, type: 'highpass', freq: 3000, gain: 0.08 }); },
+  ring() { for (let r = 0; r < 2; r++) for (let i = 0; i < 8; i++) { this.tone({ when: r * 1.6 + i * 0.1, freq: i % 2 ? 480 : 440, dur: 0.09, type: 'square', gain: 0.03 }); } },
+  powerDown() { this.tone({ freq: 420, slide: 25, dur: 2.0, type: 'sawtooth', gain: 0.15 }); this.noise({ dur: 0.5, freq: 600, gain: 0.3, brown: true }); },
+  mbNote(m) { const f = 440 * Math.pow(2, (m - 69) / 12); this.tone({ freq: f * 2, dur: 0.55, type: 'triangle', gain: 0.11 }); this.tone({ freq: f * 4, dur: 0.3, gain: 0.03 }); },
+  chime() { for (let i = 0; i < 6; i++) { this.tone({ when: 0.4 + i * 0.75, freq: 660, dur: 1.6, gain: 0.18 }); this.tone({ when: 0.4 + i * 0.75, freq: 1821, dur: 0.8, gain: 0.05 }); } for (let i = 0; i < 6; i++) this.noise({ when: 3 + i * 0.12, dur: 0.5, type: 'bandpass', freq: 1800 + i * 200, q: 3, gain: 0.05 }); },
+  scream() {
+    if (!this.ctx) return; const C = this.ctx, t = C.currentTime;
+    const ws = C.createWaveShaper(); const cu = new Float32Array(256); for (let i = 0; i < 256; i++) { const x = i / 128 - 1; cu[i] = Math.tanh(x * 6); } ws.curve = cu;
+    const g = C.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.5, t + 0.02); g.gain.setValueAtTime(0.5, t + 0.9); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.4);
+    ws.connect(g).connect(this.out);
+    const lfo = C.createOscillator(); lfo.type = 'square'; lfo.frequency.value = 32; const lg = C.createGain(); lg.gain.value = 90; lfo.connect(lg);
+    for (const f of [310, 470, 655, 890]) { const o = C.createOscillator(); o.type = 'sawtooth'; o.frequency.setValueAtTime(f, t); o.frequency.linearRampToValueAtTime(f * 0.8, t + 1.4); lg.connect(o.frequency); const og = C.createGain(); og.gain.value = 0.25; o.connect(og).connect(ws); o.start(t); o.stop(t + 1.5); }
+    lfo.start(t); lfo.stop(t + 1.5);
+    this.noise({ dur: 1.3, type: 'bandpass', freq: 2200, q: 0.6, gain: 0.5 });
+  },
+};
+// 斗牛士之歌（比才，公有领域）——停电时的八音盒
+const MELODY = [[72, 1], [74, .5], [72, .5], [69, 1.5], [69, .5], [69, .5], [67, .5], [69, .5], [70, .5], [69, 2], [70, 1], [67, .5], [72, .5], [69, 1.5], [65, .5], [62, .5], [67, .5], [60, 2]];
+
+// ============================================================ 角色绘制
+const CHARS = {
+  freddy: { name: '弗莱迪', main: '#7a4a26', dark: '#4a2a12', light: '#b98454', eye: '#4fb4ff' },
+  bonnie: { name: '邦尼', main: '#5552b0', dark: '#33306e', light: '#9a98e6', eye: '#ff3b6b' },
+  chica:  { name: '奇卡', main: '#e6b62a', dark: '#a07812', light: '#fff0b0', eye: '#c070ff' },
+  foxy:   { name: '福克斯', main: '#a8452a', dark: '#5e2414', light: '#d9a48a', eye: '#ffd23a' },
+};
+let GLOW = [];
+function glowAt(x, y, r, c) {
+  const m = ctx.getTransform(), p = m.transformPoint(new DOMPoint(x, y));
+  GLOW.push({ x: p.x, y: p.y, r: r * Math.hypot(m.a, m.b), c });
+}
+function flushGlow() {
+  if (!GLOW.length) return;
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'lighter';
+  for (const g of GLOW) {
+    const gr = ctx.createRadialGradient(g.x, g.y, 0, g.x, g.y, g.r * 3);
+    gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.22, g.c); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(g.x, g.y, g.r * 3, 0, 7); ctx.fill();
+  }
+  ctx.restore(); GLOW = [];
+}
+function eyeAt(ex, ey, rx, ry, col, o, look) {
+  if (o.creepy) { ell(ex, ey, rx, ry, '#050505'); ell(ex, ey, 2.6, 2.6, '#fff'); if (o.glow) glowAt(ex, ey, 3, '#ffffff'); return; }
+  ell(ex, ey, rx, ry, '#ece8e0');
+  const px = ex + look * rx * 0.35, py = ey + 1;
+  ell(px, py, rx * 0.52, ry * 0.5, col); ell(px, py, rx * 0.22, ry * 0.22, '#000'); ell(px - 2, py - 3, 1.6, 1.6, '#fff');
+  if (o.glow) glowAt(px, py, rx * 0.45, col);
+}
+function teethRow(x0, x1, y, h, n, sharp, dir) {
+  ctx.fillStyle = '#ece6d6'; const w = (x1 - x0) / n;
+  for (let i = 0; i < n; i++) {
+    const xa = x0 + i * w; ctx.beginPath();
+    if (sharp) { ctx.moveTo(xa, y); ctx.lineTo(xa + w, y); ctx.lineTo(xa + w / 2, y + h * dir); }
+    else ctx.rect(xa + 1, dir > 0 ? y : y - h, w - 2, h);
+    ctx.fill();
+  }
+}
+function drawBody(type, C) {
+  ctx.fillStyle = C.dark;
+  rr(-56, 228, 42, 120, 16); ctx.fill(); rr(14, 228, 42, 120, 16); ctx.fill();
+  rr(-106, 78, 34, 152, 17); ctx.fill(); rr(72, 78, 34, 152, 17); ctx.fill();
+  ell(-89, 232, 21, 19, C.main);
+  if (type === 'foxy') { ctx.strokeStyle = '#b8b8b8'; ctx.lineWidth = 7; ctx.beginPath(); ctx.arc(96, 252, 17, Math.PI * 0.9, Math.PI * 2.3); ctx.stroke(); }
+  else ell(89, 232, 21, 19, C.main);
+  rr(-22, 46, 44, 34, 8); ctx.fill();
+  ell(0, 150, 74, 94, C.main);
+  if (type === 'foxy') {
+    ell(0, 165, 44, 58, '#1a0e0a'); ctx.strokeStyle = '#6d6d6d'; ctx.lineWidth = 5;
+    for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.moveTo(-28, 132 + i * 20); ctx.lineTo(28, 132 + i * 20); ctx.stroke(); }
+    ctx.beginPath(); ctx.moveTo(0, 114); ctx.lineTo(0, 218); ctx.stroke();
+  } else ell(0, 165, 46, 62, C.light);
+  if (type === 'chica') {
+    ctx.fillStyle = '#f2f0ea'; rr(-52, 92, 104, 96, 14); ctx.fill();
+    txt('开吃啦!', 0, 138, 24, '#d0202a', 'center', FCN, 'bold');
+    txt('!!!', 0, 168, 26, '#2a4ad0', 'center', FCN, 'bold');
+  } else if (type !== 'foxy') {
+    ctx.fillStyle = type === 'bonnie' ? '#c4161c' : '#151515';
+    ctx.beginPath(); ctx.moveTo(0, 80); ctx.lineTo(-30, 64); ctx.lineTo(-30, 96); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(0, 80); ctx.lineTo(30, 64); ctx.lineTo(30, 96); ctx.closePath(); ctx.fill();
+    ell(0, 80, 7, 7, ctx.fillStyle);
+  }
+  if (type === 'freddy') { ell(0, 128, 5, 5, '#111'); ell(0, 158, 5, 5, '#111'); }
+}
+function headFreddy(C, m, look, o) {
+  ell(-50, -44, 22, 22, C.main); ell(-50, -44, 11, 11, C.dark); ell(50, -44, 22, 22, C.main); ell(50, -44, 11, 11, C.dark);
+  ell(0, 0, 64, 56, C.main);
+  if (m > 0) ell(0, 38 + 15 * m, 32, 6 + 20 * m, '#1a0806');
+  ell(0, 44 + 30 * m, 34, 13, C.light);
+  ell(0, 18, 42, 22, C.light);
+  if (m > 0.05) teethRow(-26, 26, 37, 8, 6, false, 1);
+  if (m > 0.25) teethRow(-24, 24, 33 + 30 * m, 8, 6, false, -1);
+  ell(0, 6, 12, 8, '#151010');
+  eyeAt(-24, -16, 13, 15, C.eye, o, look); eyeAt(24, -16, 13, 15, C.eye, o, look);
+  ctx.strokeStyle = C.dark; ctx.lineWidth = 5; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-37, -36); ctx.lineTo(-13, -32); ctx.moveTo(37, -36); ctx.lineTo(13, -32); ctx.stroke();
+  ctx.fillStyle = '#0d0d0d'; rr(-30, -62, 60, 9, 3); ctx.fill(); rr(-20, -98, 40, 40, 5); ctx.fill();
+  ctx.fillStyle = '#3a1a1a'; ctx.fillRect(-20, -66, 40, 6);
+}
+function headBonnie(C, m, look, o) {
+  ctx.save(); ctx.translate(-26, -52); ctx.rotate(-0.18); ell(0, -50, 19, 60, C.main); ell(0, -46, 9, 44, C.light); ctx.restore();
+  ctx.save(); ctx.translate(26, -52); ctx.rotate(0.4); ell(0, -50, 19, 60, C.main); ell(0, -46, 9, 44, C.light); ctx.restore();
+  ell(0, 0, 62, 54, C.main);
+  if (m > 0) ell(0, 38 + 15 * m, 30, 6 + 20 * m, '#14061a');
+  ell(0, 44 + 30 * m, 30, 12, C.light);
+  ell(-18, 22, 24, 18, C.light); ell(18, 22, 24, 18, C.light);
+  if (m > 0.05) teethRow(-24, 24, 36, 8, 6, false, 1); else { ctx.fillStyle = '#f4f0e6'; ctx.fillRect(-9, 30, 8, 12); ctx.fillRect(1, 30, 8, 12); }
+  if (m > 0.25) teethRow(-22, 22, 33 + 30 * m, 8, 6, false, -1);
+  ell(0, 9, 11, 7, '#c0306a');
+  eyeAt(-24, -14, 12, 14, C.eye, o, look); eyeAt(24, -14, 12, 14, C.eye, o, look);
+  if (!o.creepy) { ell(-24, -26, 15, 9, C.main); ell(24, -26, 15, 9, C.main); }
+}
+function headChica(C, m, look, o) {
+  ell(-10, -66, 8, 18, C.main, -0.4); ell(4, -72, 8, 20, C.main, 0); ell(17, -64, 7, 16, C.main, 0.5);
+  ell(0, -4, 56, 62, C.main);
+  if (m > 0) ell(0, 36 + 15 * m, 30, 6 + 22 * m, '#2a0505');
+  ell(0, 44 + 30 * m, 32, 12, '#e0640e');
+  ctx.beginPath(); ctx.moveTo(-40, 12); ctx.quadraticCurveTo(0, -4, 40, 12); ctx.quadraticCurveTo(0, 50, -40, 12); ctx.fillStyle = '#ff8c1a'; ctx.fill();
+  if (m > 0.05) teethRow(-24, 24, 31, 8, 6, false, 1);
+  if (m > 0.25) teethRow(-22, 22, 33 + 30 * m, 8, 6, false, -1);
+  eyeAt(-22, -22, 12, 15, C.eye, o, look); eyeAt(22, -22, 12, 15, C.eye, o, look);
+  ctx.strokeStyle = C.dark; ctx.lineWidth = 5; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-36, -44); ctx.lineTo(-12, -38); ctx.moveTo(36, -44); ctx.lineTo(12, -38); ctx.stroke();
+}
+function headFoxy(C, m, look, o) {
+  poly([[-46, -30], [-58, -106], [-12, -52]], C.main); poly([[-42, -42], [-52, -90], [-24, -54]], C.light);
+  poly([[46, -30], [58, -106], [12, -52]], C.main); poly([[42, -42], [52, -90], [24, -54]], C.light);
+  ell(0, -4, 56, 50, C.main);
+  if (m > 0) ell(0, 48 + 17 * m, 34, 6 + 26 * m, '#1a0605');
+  ctx.fillStyle = C.main; rr(-36, 48 + 34 * m, 72, 16, 8); ctx.fill();
+  ell(0, 28, 44, 22, C.main); ell(0, 26, 36, 15, C.light);
+  if (m > 0.05) teethRow(-30, 30, 44, 10, 7, true, 1);
+  if (m > 0.25) teethRow(-28, 28, 50 + 34 * m, 10, 7, true, -1);
+  ell(0, 14, 11, 8, '#1a1a1a');
+  eyeAt(-22, -16, 12, 14, C.eye, o, look);
+  ell(22, -16, 16, 15, '#111');
+  ctx.strokeStyle = '#111'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(-52, -38); ctx.lineTo(56, -8); ctx.stroke();
+}
+function drawChar(type, x, y, s, o = {}) {
+  const C = CHARS[type], m = o.mouth || 0, look = o.look || 0;
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s); if (o.rot) ctx.rotate(o.rot);
+  if (o.alpha != null) ctx.globalAlpha = o.alpha;
+  if (o.body !== false) drawBody(type, C);
+  ({ freddy: headFreddy, bonnie: headBonnie, chica: headChica, foxy: headFoxy })[type](C, m, look, o);
+  ctx.restore();
+}
+
+// ============================================================ 场景元素
+function checker(y0, y1, vx, w0, w1, c1, c2, rows = 10) {
+  for (let i = 0; i < rows; i++) {
+    const a = i / rows, b = (i + 1) / rows, fa = a * a, fb = b * b;
+    const ya = y0 + (y1 - y0) * fa, yb = y0 + (y1 - y0) * fb;
+    const wa = w0 + (w1 - w0) * fa, wb = w0 + (w1 - w0) * fb;
+    const n = Math.min(70, Math.ceil(Math.max(vx, WORLD - vx) / wa) + 1);
+    for (let k = -n; k < n; k++) {
+      ctx.fillStyle = ((i + k) & 1) ? c1 : c2; ctx.beginPath();
+      ctx.moveTo(vx + k * wa, ya); ctx.lineTo(vx + (k + 1) * wa, ya); ctx.lineTo(vx + (k + 1) * wb, yb); ctx.lineTo(vx + k * wb, yb); ctx.fill();
+    }
+  }
+}
+function hallway(o = {}) {
+  const bx = o.bx ?? 560, by = o.by ?? 230, bw = o.bw ?? 160, bh = o.bh ?? 200;
+  poly([[0, 0], [W, 0], [bx + bw, by], [bx, by]], o.ceil || '#0d0c0b');
+  ctx.save(); ctx.beginPath(); ctx.moveTo(0, H); ctx.lineTo(W, H); ctx.lineTo(bx + bw, by + bh); ctx.lineTo(bx, by + bh); ctx.closePath(); ctx.clip();
+  checker(by + bh, H, bx + bw / 2, bw / 6, W / 5, '#111', '#3c3a38', 10); ctx.restore();
+  poly([[0, 0], [bx, by], [bx, by + bh], [0, H]], o.wall || '#38332c');
+  poly([[W, 0], [bx + bw, by], [bx + bw, by + bh], [W, H]], o.wall2 || '#2c2823');
+  const band = (t0, t1, col) => { poly([[0, H * t0], [bx, by + bh * t0], [bx, by + bh * t1], [0, H * t1]], col); poly([[W, H * t0], [bx + bw, by + bh * t0], [bx + bw, by + bh * t1], [W, H * t1]], col); };
+  band(0.6, 0.68, '#1d3a3a'); band(0.68, 0.71, '#0e0e0e');
+  ctx.fillStyle = o.back || '#141210'; ctx.fillRect(bx, by, bw, bh);
+  // 墙上的海报（透视四边形）
+  poly([[90, 150], [230, 185], [230, 330], [90, 330]], '#b9a77a');
+  poly([[W - 90, 150], [W - 230, 185], [W - 230, 330], [W - 90, 330]], '#8c7c5a');
+  ctx.save(); ctx.fillStyle = '#7a1515'; ctx.font = `bold 26px ${FCN}`; ctx.textAlign = 'center'; ctx.setTransform(ctx.getTransform().multiply(new DOMMatrix([1, 0.25, 0, 1, 160, 220]))); ctx.fillText('庆祝!', 0, 0); ctx.restore();
+}
+function poster(x, y, w, h, title) {
+  ctx.fillStyle = '#c9b98a'; ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = '#2a1a10'; ctx.fillRect(x + 8, y + 8, w - 16, h - 16);
+  txt(title, x + w / 2, y + 46, 34, '#ff3b30', 'center', FCN, 'bold');
+}
+
+// ============================================================ 摄像头
+const CAMS = {
+  '1A': { n: '表演舞台', x: 120, y: 0 },
+  '1B': { n: '用餐区', x: 100, y: 64 },
+  '1C': { n: '海盗湾', x: 50, y: 136 },
+  '5':  { n: '后台', x: 0, y: 72 },
+  '7':  { n: '洗手间', x: 286, y: 66 },
+  '6':  { n: '厨房', x: 286, y: 166 },
+  '3':  { n: '储物间', x: 22, y: 210 },
+  '2A': { n: '西走廊', x: 120, y: 192 },
+  '2B': { n: '西走廊拐角', x: 120, y: 252 },
+  '4A': { n: '东走廊', x: 224, y: 192 },
+  '4B': { n: '东走廊拐角', x: 224, y: 252 },
+};
+const MAP_X = 896, MAP_Y = 360;
+const DARK = { '1A': 0.3, '1B': 0.45, '1C': 0.5, '5': 0.55, '7': 0.5, '3': 0.62, '2A': 0.5, '2B': 0.45, '4A': 0.5, '4B': 0.45 };
+const at = id => ['freddy', 'bonnie', 'chica'].filter(k => G.a[k].loc === id);
+
+const ROOMS = {
+  '1A'() {
+    ctx.fillStyle = '#120a12'; ctx.fillRect(0, 0, W, H);
+    const g = ctx.createLinearGradient(0, 0, 0, 480); g.addColorStop(0, '#2a0f2e'); g.addColorStop(1, '#14061a');
+    ctx.fillStyle = g; ctx.fillRect(60, 20, 1160, 460);
+    ctx.fillStyle = 'rgba(0,0,0,0.28)'; for (let x = 60; x < 1220; x += 58) ctx.fillRect(x, 20, 22, 460);
+    for (const s of STARS) star(s.x, s.y, s.s, 'rgba(255,225,110,0.55)');
+    ctx.fillStyle = '#6a1515'; rr(380, 40, 520, 60, 8); ctx.fill();
+    txt('★ 弗莱迪披萨店 ★', 640, 82, 34, '#ffd860', 'center', FCN, 'bold');
+    ctx.fillStyle = '#3a2414'; ctx.fillRect(0, 470, W, 250);
+    ctx.strokeStyle = '#25160c'; ctx.lineWidth = 3; for (let y = 495; y < 600; y += 26) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    ctx.fillStyle = '#1d120a'; ctx.fillRect(0, 600, W, 120);
+    const h = at('1A'), alone = h.length === 1 && h[0] === 'freddy';
+    if (h.includes('bonnie')) drawChar('bonnie', 400, 290, 0.95, { look: 0.5 });
+    if (h.includes('freddy')) drawChar('freddy', 640, 280, 1.0, { look: 0, creepy: alone && Math.sin(G.t * 0.7) > 0.6, glow: alone });
+    if (h.includes('chica')) drawChar('chica', 880, 290, 0.95, { look: -0.5 });
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    for (const x of [400, 640, 880]) { const sg = ctx.createRadialGradient(x, 300, 10, x, 300, 260); sg.addColorStop(0, 'rgba(255,240,200,0.10)'); sg.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = sg; ctx.fillRect(x - 260, 40, 520, 520); }
+    ctx.restore();
+  },
+  '1B'() {
+    ctx.fillStyle = '#2a221c'; ctx.fillRect(0, 0, W, 340);
+    for (const d of DRAWINGS) kidDrawing(d);
+    ctx.fillStyle = '#183232'; ctx.fillRect(0, 300, W, 40);
+    checker(340, H, 640, 30, 210, '#151515', '#5a5650', 12);
+    const h = at('1B');
+    if (h.includes('freddy')) drawChar('freddy', 640, 250, 0.42, { glow: true, look: 0 });
+    const table = (x, y, w, s) => {
+      ctx.fillStyle = '#ddd8cc'; rr(x, y, w, 26 * s, 4); ctx.fill(); ctx.fillStyle = '#aaa59a'; ctx.fillRect(x, y + 26 * s, w, 16 * s);
+      for (let i = 0; i < w / (60 * s); i++) { const hx = x + 30 * s + i * 60 * s; poly([[hx - 10 * s, y + 4], [hx + 10 * s, y + 4], [hx, y - 30 * s]], ['#e33', '#39f', '#fc2', '#3c6'][i % 4]); }
+    };
+    table(140, 400, 380, 0.8); table(760, 400, 380, 0.8);
+    if (h.includes('bonnie')) drawChar('bonnie', 300, 330, 0.72, { look: 0.8 });
+    if (h.includes('chica')) drawChar('chica', 980, 330, 0.72, { look: -0.8, mouth: 0.15 });
+    table(40, 560, 520, 1.2); table(720, 560, 520, 1.2);
+  },
+  '1C'() {
+    ctx.fillStyle = '#0b0710'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#2a1a10'; ctx.fillRect(220, 500, 840, 220);
+    const st = G.foxy.stage, gap = G.foxy.running ? 540 : [0, 70, 170, 540][st];
+    if (!G.foxy.running) {
+      if (st === 1) drawChar('foxy', 640, 330, 1.0, { look: 0.2, glow: true });
+      if (st === 2) drawChar('foxy', 660, 300, 1.15, { mouth: 0.35, glow: true, rot: -0.08 });
+    }
+    const curtain = (x0, x1) => {
+      if (x1 - x0 < 2) return;
+      ctx.fillStyle = '#3d1257'; ctx.fillRect(x0, 60, x1 - x0, 470);
+      ctx.fillStyle = 'rgba(0,0,0,0.3)'; for (let x = x0; x < x1; x += 46) ctx.fillRect(x, 60, 16, 470);
+      for (const s of CURTAIN_STARS) { const sx = x0 + s.x * (x1 - x0); star(sx, 80 + s.y * 420, s.s, 'rgba(255,220,120,0.6)'); }
+    };
+    curtain(250, 640 - gap / 2); curtain(640 + gap / 2, 1030);
+    ctx.fillStyle = '#5a3a20'; ctx.fillRect(230, 48, 820, 14);
+    ctx.save(); ctx.translate(640, 590); ctx.rotate(-0.04);
+    ctx.fillStyle = '#d8c89a'; rr(-170, -45, 340, 90, 6); ctx.fill();
+    txt('抱歉！暂停营业', 0, 14, 38, '#c01818', 'center', FCN, 'bold'); ctx.restore();
+    ctx.fillStyle = '#4a3020'; ctx.fillRect(500, 635, 12, 85); ctx.fillRect(768, 635, 12, 85);
+  },
+  '2A'() {
+    hallway({ wall: '#3a352e', wall2: '#2e2a25' });
+    for (let i = 0; i < 4; i++) { const d = DRAWINGS[i]; ctx.save(); ctx.transform(1, 0.22, 0, 1, 0, 0); kidDrawing({ ...d, x: 260 + i * 70, y: 200 - i * 10 + 60, w: 40, h: 34 }); ctx.restore(); }
+    if (G.a.bonnie.loc === '2A') drawChar('bonnie', 640, 330, 0.48, { glow: true, look: 0 });
+    if (G.foxy.running) {
+      const p = clamp(G.foxy.runT / 2.0, 0, 1);
+      drawChar('foxy', 640 + p * 260, 330 + p * 90, 0.35 + p * 2.6, { mouth: 0.35 + 0.3 * Math.sin(G.t * 30), rot: 0.15, glow: true });
+    }
+    if (Math.sin(G.t * 13) + Math.sin(G.t * 7.1) > 1.2) { ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(0, 0, W, H); }
+  },
+  '2B'() {
+    ctx.fillStyle = '#2d2a24'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#1d3a3a'; ctx.fillRect(0, 480, W, 60); ctx.fillStyle = '#0e0e0e'; ctx.fillRect(0, 540, W, 10);
+    checker(550, H, 640, 60, 200, '#141414', '#3a3836', 6);
+    poster(280, 110, 300, 360, '庆祝!');
+    drawChar('bonnie', 340, 330, 0.32, {}); drawChar('freddy', 430, 320, 0.36, {}); drawChar('chica', 520, 330, 0.32, {});
+    ctx.strokeStyle = '#111'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(0, 40); ctx.bezierCurveTo(400, 90, 800, 20, W, 70); ctx.stroke();
+    if (G.a.bonnie.loc === '2B') drawChar('bonnie', 860, 320, 1.5, { creepy: true, glow: true, rot: -0.1 });
+  },
+  '3'() {
+    ctx.fillStyle = '#120f0c'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#1e1a16'; ctx.fillRect(0, 520, W, 200);
+    ctx.fillStyle = '#3a2f22';
+    for (const y of [150, 290, 430]) { ctx.fillRect(80, y, 380, 14); ctx.fillRect(840, y, 380, 14); }
+    const R2 = srand(7);
+    for (const y of [150, 290, 430]) for (const x0 of [90, 850]) for (let i = 0; i < 4; i++) { const w = 50 + R2() * 40, h = 40 + R2() * 60; ctx.fillStyle = ['#5a4a32', '#4a3f2e', '#6a5a3a'][i % 3]; ctx.fillRect(x0 + i * 90, y - h, w, h); }
+    ctx.strokeStyle = '#7a6a50'; ctx.lineWidth = 8; ctx.beginPath(); ctx.moveTo(1050, 200); ctx.lineTo(1000, 620); ctx.stroke();
+    ell(995, 640, 40, 18, '#888'); ctx.fillStyle = '#3a5a7a'; rr(900, 600, 90, 90, 8); ctx.fill();
+    if (G.a.bonnie.loc === '3') drawChar('bonnie', 640, 320, 1.15, { glow: true, look: 0.2 });
+  },
+  '4A'() {
+    hallway({ wall: '#36322c', wall2: '#2a2622' });
+    ctx.fillStyle = '#2a3a2a'; rr(160, 500, 70, 110, 6); ctx.fill(); ctx.fillStyle = '#1a2a1a'; ctx.fillRect(150, 495, 90, 14);
+    const h = at('4A'), both = h.length > 1;
+    if (h.includes('chica')) drawChar('chica', both ? 590 : 640, 330, 0.55, { glow: true });
+    if (h.includes('freddy')) drawChar('freddy', both ? 700 : 640, 320, 0.55, { glow: true });
+    if (Math.sin(G.t * 11) + Math.sin(G.t * 5.3) > 1.4) { ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0, 0, W, H); }
+  },
+  '4B'() {
+    ctx.fillStyle = '#2b2823'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#1d3a3a'; ctx.fillRect(0, 480, W, 60); ctx.fillStyle = '#0e0e0e'; ctx.fillRect(0, 540, W, 10);
+    checker(550, H, 640, 60, 200, '#141414', '#3a3836', 6);
+    ctx.fillStyle = '#e2dcc6'; ctx.fillRect(220, 120, 320, 360);
+    txt('本地新闻', 380, 170, 30, '#222', 'center', FCN, 'bold');
+    txt('披萨店儿童失踪案', 380, 210, 24, '#222', 'center', FCN, 'bold');
+    ctx.fillStyle = '#888'; for (let i = 0; i < 9; i++) ctx.fillRect(250, 240 + i * 22, 260 - (i % 3) * 40, 8);
+    const h = at('4B');
+    if (h.includes('freddy')) drawChar('freddy', 560, 330, 1.3, { glow: true, look: 1 });
+    if (h.includes('chica')) drawChar('chica', 820, 320, 1.45, { creepy: true, mouth: 0.4, glow: true, rot: 0.08 });
+  },
+  '5'() {
+    ctx.fillStyle = '#1a1612'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#2a2420'; ctx.fillRect(0, 500, W, 220);
+    ctx.fillStyle = '#3a2f22'; ctx.fillRect(140, 300, 520, 16);
+    drawChar('freddy', 230, 240, 0.48, { body: false });
+    drawChar('bonnie', 400, 255, 0.45, { body: false, creepy: true });
+    drawChar('chica', 560, 255, 0.45, { body: false, creepy: true });
+    ctx.strokeStyle = '#6a6a6a'; ctx.lineWidth = 10; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(1040, 260); ctx.lineTo(1040, 480); ctx.moveTo(990, 300); ctx.lineTo(1090, 300); ctx.moveTo(990, 300); ctx.lineTo(970, 430); ctx.moveTo(1090, 300); ctx.lineTo(1110, 430);
+    ctx.moveTo(1040, 480); ctx.lineTo(1000, 640); ctx.moveTo(1040, 480); ctx.lineTo(1080, 640); ctx.stroke();
+    ell(1040, 210, 46, 50, '#5a5a5a'); ell(1022, 200, 9, 9, '#000'); ell(1058, 200, 9, 9, '#000'); ell(1022, 200, 2.5, 2.5, '#fff'); ell(1058, 200, 2.5, 2.5, '#fff');
+    ctx.fillStyle = '#222'; ctx.fillRect(1018, 232, 44, 12);
+    ctx.fillStyle = '#3d3326'; ctx.fillRect(160, 560, 520, 30);
+    if (G.a.bonnie.loc === '5') drawChar('bonnie', 700, 350, 1.75, { creepy: true, glow: true });
+  },
+  '7'() {
+    ctx.fillStyle = '#26221d'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#1d3a3a'; ctx.fillRect(0, 470, W, 50);
+    checker(520, H, 640, 50, 200, '#121212', '#4a4844', 7);
+    for (const [x, s] of [[150, '男'], [930, '女']]) {
+      ctx.fillStyle = '#4a3a2a'; ctx.fillRect(x, 170, 200, 350); ctx.fillStyle = '#2a2018'; ctx.fillRect(x + 10, 180, 180, 340);
+      ctx.fillStyle = '#d8d0c0'; rr(x + 70, 220, 60, 60, 6); ctx.fill(); txt(s, x + 100, 265, 40, '#1a3a7a', 'center', FCN, 'bold');
+    }
+    const h = at('7');
+    if (h.includes('freddy')) drawChar('freddy', 470, 330, 0.85, { glow: true });
+    if (h.includes('chica')) drawChar('chica', 700, 310, 1.0, { mouth: 0.25, look: 0.6 });
+  },
+};
+
+function drawCamView() {
+  const id = G.camId;
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  if (id === '6') {
+    drawStatic(0.12);
+    txt('—— 摄像头已禁用 ——', 640, 330, 42, '#ddd', 'center', FCN, 'bold');
+    txt('仅 音 频', 640, 380, 30, '#aaa', 'center', FCN);
+  } else {
+    ctx.save();
+    ctx.translate(640, 360); ctx.scale(1.08, 1.08); ctx.translate(-640 + Math.sin(G.t * 0.35) * 38, -360);
+    ROOMS[id]();
+    ctx.restore();
+    ctx.fillStyle = `rgba(0,0,0,${DARK[id]})`; ctx.fillRect(0, 0, W, H);
+    const vg = ctx.createRadialGradient(640, 360, 160, 640, 360, 820); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.92)');
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(40,70,50,0.10)'; ctx.fillRect(0, 0, W, H);
+    flushGlow();
+    drawStatic(0.1 + Math.random() * 0.05);
+  }
+  GLOW = [];
+  if (G.disrupt > 0) { ctx.fillStyle = `rgba(0,0,0,${Math.min(1, G.disrupt * 1.4)})`; ctx.fillRect(0, 0, W, H); drawStatic(Math.min(1, 0.3 + G.disrupt)); }
+  if (G.switchT > 0) drawStatic(G.switchT * 4);
+  if (!SCAN) SCAN = ctx.createPattern(scanCanvas, 'repeat');
+  ctx.fillStyle = SCAN; ctx.fillRect(0, 0, W, H);
+  drawCamUI();
+}
+function drawCamUI() {
+  ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 3;
+  for (const [x, y, dx, dy] of [[30, 30, 1, 1], [W - 30, 30, -1, 1], [30, H - 30, 1, -1], [W - 30, H - 30, -1, -1]]) {
+    ctx.beginPath(); ctx.moveTo(x + dx * 46, y); ctx.lineTo(x, y); ctx.lineTo(x, y + dy * 46); ctx.stroke();
+  }
+  if (Math.floor(G.t * 1.5) % 2 === 0) ell(48, 574, 11, 11, '#e11');
+  txt('REC', 68, 586, 36, '#fff', 'left', FNUM);
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'; rr(MAP_X - 16, MAP_Y - 56, 380, 360, 8); ctx.fill();
+  ctx.strokeStyle = 'rgba(220,220,220,0.75)'; ctx.lineWidth = 3;
+  for (const [x, y, w, h] of [[60, 34, 236, 128], [4, 64, 56, 70], [276, 56, 70, 80], [276, 160, 70, 60], [134, 162, 30, 120], [238, 162, 30, 120], [16, 200, 74, 50], [164, 262, 74, 36]]) ctx.strokeRect(MAP_X + x, MAP_Y + y, w, h);
+  txt('你', MAP_X + 201, MAP_Y + 288, 18, '#fff', 'center', FCN, 'bold');
+  const blink = Math.floor(G.t * 3) % 2 === 0;
+  for (const [id, c] of Object.entries(CAMS)) {
+    const x = MAP_X + c.x, y = MAP_Y + c.y, sel = id === G.camId;
+    ctx.fillStyle = sel ? (blink ? '#8fdc3a' : '#5ea322') : '#7a7a7a'; rr(x, y, 56, 28, 3); ctx.fill();
+    ctx.strokeStyle = '#ddd'; ctx.lineWidth = 2; ctx.stroke();
+    txt(id, x + 28, y + 23, 26, '#fff', 'center', FNUM);
+  }
+  txt(CAMS[G.camId].n, MAP_X, MAP_Y - 18, 30, '#fff', 'left', FCN, 'bold');
+}
+
+// ============================================================ 办公室
+const BTN = { L: { x: 92, door: 322, light: 412 }, R: { x: 1508, door: 322, light: 412 } };
+function drawOffice() {
+  const t = G.t, P = G.powerOut;
+  ctx.save(); ctx.translate(-G.scroll, 0);
+  const g = ctx.createLinearGradient(0, 0, 0, 560); g.addColorStop(0, '#14110f'); g.addColorStop(1, '#2b2620');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, WORLD, 560);
+  ctx.fillStyle = '#1d2a2a'; ctx.fillRect(0, 450, WORLD, 110);
+  for (let x = 0; x < WORLD; x += 28) { ctx.fillStyle = (x / 28) % 2 ? '#233434' : '#132222'; ctx.fillRect(x, 470, 28, 28); ctx.fillStyle = (x / 28) % 2 ? '#132222' : '#233434'; ctx.fillRect(x, 498, 28, 28); }
+  ctx.save(); ctx.beginPath(); ctx.rect(0, 560, WORLD, 160); ctx.clip();
+  checker(560, 720, 800, 46, 150, '#161616', '#3a3a3a', 7); ctx.restore();
+  for (const d of DRAWINGS.slice(0, 12)) kidDrawing({ ...d, x: 380 + d.x * 0.7, y: 40 + d.y * 0.9 });
+  poster(600, 110, 300, 200, '庆祝!');
+  drawChar('bonnie', 670, 248, 0.3, { body: false }); drawChar('freddy', 750, 242, 0.34, { body: false }); drawChar('chica', 830, 248, 0.3, { body: false });
+  ctx.fillStyle = '#111'; ctx.fillRect(798, 0, 4, 60);
+  poly([[760, 60], [840, 60], [870, 92], [730, 92]], '#2a2a2a');
+  // 桌子
+  ctx.fillStyle = '#2b2a28'; ctx.fillRect(470, 540, 660, 180);
+  ctx.fillStyle = '#4a4844'; rr(450, 500, 700, 50, 6); ctx.fill();
+  ctx.fillStyle = '#2d2d2d'; rr(860, 392, 140, 108, 6); ctx.fill(); ctx.fillStyle = P ? '#050505' : '#0d1a10'; rr(870, 402, 120, 80, 4); ctx.fill();
+  if (!P) { ctx.fillStyle = '#3c8a4a'; for (let i = 0; i < 5; i++) ctx.fillRect(880, 414 + i * 13, 40 + ((i * 37 + Math.floor(t * 2)) % 60), 5); }
+  ctx.fillStyle = '#333'; rr(1010, 420, 90, 80, 5); ctx.fill(); ctx.fillStyle = '#081008'; ctx.fillRect(1018, 428, 74, 54);
+  // 风扇
+  ctx.fillStyle = '#3a3a3a'; ctx.fillRect(672, 470, 16, 34); ell(680, 504, 40, 8, '#2e2e2e');
+  ctx.save(); ctx.translate(680, 428);
+  const spin = P ? t * 0.2 : t * 22;
+  for (let i = 0; i < 3; i++) { ctx.save(); ctx.rotate(spin + i * 2.094); ell(0, -20, 11, 22, 'rgba(110,110,110,0.75)'); ctx.restore(); }
+  ell(0, 0, 8, 8, '#555'); ctx.strokeStyle = '#555'; ctx.lineWidth = 2;
+  for (let i = 0; i < 12; i++) { ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(i * 0.52) * 46, Math.sin(i * 0.52) * 46); ctx.stroke(); }
+  ctx.beginPath(); ctx.arc(0, 0, 46, 0, 7); ctx.stroke(); ctx.restore();
+  // 纸杯蛋糕
+  poly([[560, 500], [600, 500], [594, 470], [566, 470]], '#d06090');
+  ell(580, 462, 26, 16, '#ff7ab8'); ell(572, 458, 3, 3, '#000'); ell(588, 458, 3, 3, '#000');
+  ctx.fillStyle = '#eee'; ctx.fillRect(578, 430, 4, 20); if (!P) ell(580, 426, 3, 5, '#ffcc33');
+  ctx.fillStyle = '#c8c0b0'; ctx.fillRect(760, 486, 22, 14); ctx.fillRect(1130, 470, 14, 30);
+  // 环境光照
+  const lg = ctx.createRadialGradient(800, 180, 120, 800, 300, 900);
+  const flick = P ? 0.93 : (0.62 + (Math.random() < 0.03 ? 0.15 : 0));
+  lg.addColorStop(0, `rgba(0,0,0,${P ? 0.9 : 0.1})`); lg.addColorStop(1, `rgba(0,0,0,${flick})`);
+  ctx.fillStyle = lg; ctx.fillRect(0, 0, WORLD, H);
+  if (!P) { const lamp = ctx.createRadialGradient(800, 92, 4, 800, 140, 380); lamp.addColorStop(0, 'rgba(255,235,180,0.20)'); lamp.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = lamp; ctx.fillRect(400, 60, 800, 500); }
+  // 门洞
+  drawDoorway('L', 150); drawDoorway('R', 1260);
+  // 停电：弗莱迪出现在左门
+  if (P && G.po.phase === 'music') {
+    ctx.save(); ctx.beginPath(); ctx.rect(150, 140, 190, 440); ctx.clip();
+    if (G.po.flash) { drawChar('freddy', 245, 330, 1.05, { glow: true }); ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(150, 140, 190, 440); }
+    else { glowAt(221, 314, 4, '#4fb4ff'); glowAt(269, 314, 4, '#4fb4ff'); }
+    ctx.restore();
+  }
+  drawPanel('L'); drawPanel('R');
+  if (P) { ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(0, 0, WORLD, H); }
+  ctx.restore();
+  flushGlow();
+  if (P && G.po.phase === 'black') { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); }
+}
+function drawDoorway(side, x) {
+  const light = side === 'L' ? G.lightL : G.lightR, d = side === 'L' ? G.doorLA : G.doorRA;
+  const who = side === 'L' ? (G.a.bonnie.loc === 'L' ? 'bonnie' : null) : (G.a.chica.loc === 'R' ? 'chica' : null);
+  const flick = light && Math.random() < 0.06;
+  ctx.save(); ctx.beginPath(); ctx.rect(x, 140, 190, 440); ctx.clip();
+  if (light && !flick && !G.powerOut) {
+    const g = ctx.createLinearGradient(x, 140, x, 580); g.addColorStop(0, '#5a5448'); g.addColorStop(0.7, '#3a362e'); g.addColorStop(1, '#6a665e');
+    ctx.fillStyle = g; ctx.fillRect(x, 140, 190, 440);
+    ctx.fillStyle = '#26221c'; ctx.fillRect(x + (side === 'L' ? 0 : 120), 140, 70, 440);
+    if (who) drawChar(who, x + 95, 320, 1.05, { look: side === 'L' ? 1 : -1, mouth: who === 'chica' ? 0.3 : 0 });
+  } else { ctx.fillStyle = '#040404'; ctx.fillRect(x, 140, 190, 440); }
+  if (d > 0.01) {
+    const h = 440 * d;
+    ctx.fillStyle = '#4a4a4c'; ctx.fillRect(x, 140, 190, h);
+    ctx.fillStyle = '#3a3a3c'; for (let y = 140 + h - 20; y > 140; y -= 26) ctx.fillRect(x, y, 190, 6);
+    for (let i = 0; i < 8; i++) poly([[x + i * 26, 140 + h - 26], [x + i * 26 + 13, 140 + h - 26], [x + i * 26 + 26, 140 + h], [x + i * 26 + 13, 140 + h]], i % 2 ? '#d8b020' : '#1a1a1a');
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(x, 140, 190, h);
+  }
+  ctx.restore();
+  ctx.strokeStyle = '#1c1c1c'; ctx.lineWidth = 16; ctx.strokeRect(x - 8, 132, 206, 456);
+}
+function drawPanel(side) {
+  const b = BTN[side], dis = G.inside && G.inside.side === side && G.inside.who !== 'freddy';
+  const dOn = side === 'L' ? G.doorL : G.doorR, lOn = side === 'L' ? G.lightL : G.lightR, P = G.powerOut;
+  ctx.fillStyle = '#262626'; rr(b.x - 34, 270, 68, 190, 8); ctx.fill(); ctx.strokeStyle = '#0c0c0c'; ctx.lineWidth = 3; ctx.stroke();
+  ell(b.x, b.door, 24, 24, '#111');
+  ell(b.x, b.door, 20, 20, P || dis ? '#2a0a0a' : dOn ? '#ff2a2a' : '#7a1414');
+  if (dOn && !P) glowAt(b.x, b.door, 6, '#ff3030');
+  ell(b.x, b.light, 24, 24, '#111');
+  ell(b.x, b.light, 20, 20, P || dis ? '#1a1a1a' : lOn ? '#f2f2ff' : '#5a5a5a');
+  txt('门', b.x, b.door + 42, 15, '#999', 'center'); txt('灯', b.x, b.light + 42, 15, '#999', 'center');
+}
+
+// ============================================================ HUD
+function drawHUD() {
+  const hr = Math.floor(G.time / HOUR);
+  txt(`${hr === 0 ? 12 : hr} AM`, 1250, 64, 72, '#fff', 'right', FNUM);
+  txt(`第 ${G.night} 夜`, 1250, 98, 24, '#ddd', 'right');
+  txt(`剩余电量: ${Math.max(0, Math.ceil(G.power))}%`, 24, 640, 24, '#fff', 'left', FCN, 'bold');
+  txt('用电量:', 24, 684, 24, '#fff', 'left', FCN, 'bold');
+  const u = usage(), cols = ['#4ad04a', '#4ad04a', '#e0d040', '#e05030', '#e05030'];
+  for (let i = 0; i < u; i++) { ctx.fillStyle = cols[i]; rr(116 + i * 24, 662, 18, 28, 3); ctx.fill(); }
+  ctx.fillStyle = G.cam ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.10)'; rr(340, H - 48, 500, 38, 6); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 2; ctx.stroke();
+  txt(G.cam ? '︾   放下监控   ︾' : '︽   监  控   ︽', 590, H - 20, 22, '#fff', 'center', FCN, 'bold');
+}
+function drawPhone() {
+  if (!G.phone) return;
+  ctx.fillStyle = 'rgba(80,0,0,0.75)'; rr(20, 20, 130, 40, 6); ctx.fill(); ctx.strokeStyle = '#c33'; ctx.lineWidth = 2; ctx.stroke();
+  txt('静音电话', 85, 47, 20, '#fff', 'center', FCN, 'bold');
+  if (G.phone.i < 0) { txt('📞 电话铃响…', 170, 48, 22, '#ddd'); return; }
+  const line = G.phone.lines[G.phone.i];
+  ctx.font = `20px ${FCN}`;
+  const lines = []; let cur = '';
+  for (const ch of line) { if (ctx.measureText(cur + ch).width > 640) { lines.push(cur); cur = ch; } else cur += ch; }
+  lines.push(cur);
+  ctx.fillStyle = 'rgba(0,0,0,0.6)'; rr(20, 70, 680, 18 + lines.length * 30, 6); ctx.fill();
+  lines.forEach((l, i) => txt(l, 36, 100 + i * 30, 20, '#f0e8d0'));
+}
+
+// ============================================================ 游戏逻辑
+const PHONE = {
+  1: ['喂？喂喂？呃……欢迎来到弗莱迪披萨店的夜班岗位。', '我是来帮你熟悉工作的。之前那位……嗯，他干完这周就不干了。', '白天这些玩偶会给孩子们表演；到了晚上，它们会进入"自由漫游模式"。', '要是它们半夜看见你，八成会把你当成一副没穿外套的金属骨架……', '然后试着把你塞进一套玩偶服里。嗯……那可不太舒服。', '记住：电量有限。门和灯都很耗电，监控也是。', '实在不行就关门。好了，第一晚愉快，明天再聊！'],
+  2: ['嗨，又是我！恭喜你活过了第一晚。', '邦尼和奇卡会越来越活跃，多用门灯确认它们在不在门口。', '还有海盗湾里的福克斯——它不喜欢被盯着，但更不喜欢被冷落。', '如果它从帘子后探出头，就多看看它。要是它冲出来……马上关左门！'],
+  3: ['第三晚了，你干得不错。', '弗莱迪喜欢待在暗处，只在你不看它的时候移动。', '它要是到了东走廊拐角，就别犹豫，关上右门。'],
+  4: ['嘿……是我……今晚我可能……（撞击声）', '如果你听到这段……检查一下后台那些空玩偶服……', '（低沉的呻吟）……（嘈杂的电流声）'],
+  5: ['（扭曲的杂音）……（听不清的低语）……'],
+};
+const AI_TABLE = { 1: [0, 3, 1, 0], 2: [0, 4, 2, 1], 3: [1, 4, 5, 2], 4: [2, 5, 5, 6], 5: [3, 7, 7, 6], 6: [4, 10, 12, 9] };
+const EXTRA = [0, 0, 0, 0.02, 0.03, 0.04, 0.05, 0.05];
+const INTERVAL = { freddy: 3.02, bonnie: 4.97, chica: 4.98 };
+const GRAPH = {
+  bonnie: { '1A': ['1B', '5'], '1B': ['5', '2A'], '5': ['1B', '2A'], '2A': ['3', '2B'], '3': ['2A', 'L'], '2B': ['3', 'L'] },
+  chica: { '1A': ['1B'], '1B': ['7', '6'], '7': ['6', '4A'], '6': ['7', '4A'], '4A': ['4B', '1B'], '4B': ['4A', 'R'] },
+  freddy: { '1A': ['1B'], '1B': ['7'], '7': ['6'], '6': ['4A'], '4A': ['4B'] },
+};
+
+let G = { state: 'menu', t: 0 };
+const mouse = { x: W / 2, y: H / 2, active: false, inBar: false };
+const keys = { scroll: 0 };
+
+function startNight(n, custom) {
+  const ai = custom ? SAVE.custom.slice() : AI_TABLE[n].slice();
+  G = {
+    state: 'intro', introT: 0, night: n, t: 0, time: 0, hour: 0, power: 100,
+    doorL: false, doorR: false, doorLA: 0, doorRA: 0, lightL: false, lightR: false,
+    cam: false, camAnim: 0, camId: '1A', scroll: (WORLD - W) / 2, disrupt: 0, switchT: 0, inside: null, powerOut: false, po: null,
+    ai: { freddy: ai[0], bonnie: ai[1], chica: ai[2], foxy: ai[3] },
+    a: { freddy: { loc: '1A', timer: INTERVAL.freddy }, bonnie: { loc: '1A', timer: INTERVAL.bonnie }, chica: { loc: '1A', timer: INTERVAL.chica } },
+    foxy: { stage: 0, timer: 5.01, wait: 0, limit: rnd(18, 28), running: false, runT: 0, knocks: 0 },
+    phone: PHONE[n] && !custom ? { lines: PHONE[n], i: -1, t: 3.6 } : null,
+    ambT: rnd(15, 30),
+  };
+}
+function usage() { return G.powerOut ? 0 : 1 + (G.doorL ? 1 : 0) + (G.doorR ? 1 : 0) + (G.lightL || G.lightR ? 1 : 0) + (G.cam ? 1 : 0); }
+function setLights(l, r) { G.lightL = l; G.lightR = r; AU.setLight(l || r); }
+function toggleCam() {
+  if (G.state !== 'play' || G.powerOut) return;
+  G.cam = !G.cam;
+  if (G.cam) { setLights(false, false); AU.camUp(); G.switchT = 0.15; } else AU.camDown();
+}
+function sideBlocked(side) { return G.inside && G.inside.side === side && G.inside.who !== 'freddy'; }
+function toggleDoor(side) {
+  if (G.cam || G.powerOut || G.state !== 'play') return;
+  if (sideBlocked(side)) return AU.error();
+  if (side === 'L') G.doorL = !G.doorL; else G.doorR = !G.doorR;
+  AU.door();
+}
+function toggleLight(side) {
+  if (G.cam || G.powerOut || G.state !== 'play') return;
+  if (sideBlocked(side)) return AU.error();
+  if (side === 'L') setLights(!G.lightL, false); else setLights(false, !G.lightR);
+  AU.click();
+  const k = side === 'L' ? 'bonnie' : 'chica', a = G.a[k];
+  if ((side === 'L' ? G.lightL : G.lightR) && a.loc === side && !a.seen) { a.seen = true; AU.stinger(); }
+}
+function switchCam(id) { if (id === G.camId) return; G.camId = id; G.switchT = 0.12; AU.camSwitch(); }
+
+function moveTo(k, to) {
+  const a = G.a[k], from = a.loc; a.loc = to; a.seen = false;
+  if (G.cam && (G.camId === from || G.camId === to)) { G.disrupt = 0.9; AU.staticBurst(); }
+  if (to === 'L' || to === 'R' || to === '2B' || to === '4B') AU.steps(2, 0.5, 0.18);
+  if (k === 'freddy') AU.laugh();
+  if (to === 'L' && G.lightL) { a.seen = true; AU.stinger(); }
+  if (to === 'R' && G.lightR) { a.seen = true; AU.stinger(); }
+}
+function enterOffice(k, side) {
+  G.a[k].loc = 'IN';
+  G.inside = { who: k, side, t: rnd(8, 15), armed: G.cam };
+  if (k !== 'freddy') { if (side === 'L') G.lightL = false; else G.lightR = false; AU.setLight(G.lightL || G.lightR); }
+  AU.groan();
+}
+function opportunity(k) {
+  const a = G.a[k];
+  if (a.loc === 'IN' || ri(1, 20) > G.ai[k]) return;
+  if (k === 'freddy') {
+    if (a.loc === '4B') {
+      if (G.doorR) moveTo('freddy', '4A');
+      else if (G.cam && G.camId !== '4B' && !G.inside) enterOffice('freddy', 'R');
+      return;
+    }
+    if (G.cam && G.camId === a.loc) return;
+    if (a.loc === '1A' && (G.a.bonnie.loc === '1A' || G.a.chica.loc === '1A')) return;
+    return moveTo('freddy', GRAPH.freddy[a.loc][0]);
+  }
+  const door = k === 'bonnie' ? 'L' : 'R';
+  if (a.loc === door) {
+    if (door === 'L' ? G.doorL : G.doorR) moveTo(k, '1B');
+    else if (!G.inside) enterOffice(k, door);
+    return;
+  }
+  moveTo(k, pick(GRAPH[k][a.loc]));
+}
+function onHour(h) {
+  if (h === 2) G.ai.bonnie++;
+  if (h === 3 || h === 4) { G.ai.bonnie++; G.ai.chica++; G.ai.foxy++; }
+}
+function jumpscare(who) {
+  if (G.state !== 'play') return;
+  G.state = 'jumpscare'; G.js = { who, t: 0 }; G.cam = false; G.camAnim = 0;
+  AU.stopLoops(); AU.scream();
+}
+function win() {
+  G.state = 'win'; G.winT = 0; G.phone = null; AU.stopLoops(); AU.chime();
+  if (G.night <= 4) SAVE.night = Math.max(SAVE.night, G.night + 1);
+  if (G.night === 5) SAVE.beat5 = true;
+  if (G.night === 6) SAVE.beat6 = true;
+  save();
+}
+function powerOutStart() {
+  G.power = 0; G.powerOut = true; G.po = { phase: 'dark', t: rnd(3, 7), note: 0, nt: 0, flash: false };
+  G.doorL = G.doorR = false; G.lightL = G.lightR = false; G.cam = false; G.phone = null;
+  AU.stopLoops(); AU.powerDown();
+}
+function toMenu() { AU.stopLoops(); G = { state: 'menu', t: 0 }; }
+
+function updatePlay(dt) {
+  G.t += dt;
+  G.camAnim += clamp((G.cam ? 1 : 0) - G.camAnim, -dt * 5, dt * 5);
+  G.doorLA += clamp((G.doorL ? 1 : 0) - G.doorLA, -dt * 6, dt * 6);
+  G.doorRA += clamp((G.doorR ? 1 : 0) - G.doorRA, -dt * 6, dt * 6);
+  G.disrupt = Math.max(0, G.disrupt - dt); G.switchT = Math.max(0, G.switchT - dt);
+  if (!G.cam) {
+    let v = keys.scroll;
+    if (mouse.active && mouse.y < H - 60) { if (mouse.x < W * 0.25) v -= 1 - mouse.x / (W * 0.25); else if (mouse.x > W * 0.75) v += (mouse.x - W * 0.75) / (W * 0.25); }
+    G.scroll = clamp(G.scroll + v * 900 * dt, 0, WORLD - W);
+  }
+  G.time += dt;
+  const hr = Math.floor(G.time / HOUR);
+  if (hr !== G.hour) { G.hour = hr; onHour(hr); }
+  if (G.time >= HOUR * 6) return win();
+  if (G.phone) { G.phone.t -= dt; if (G.phone.t <= 0) { G.phone.i++; if (G.phone.i >= G.phone.lines.length) G.phone = null; else G.phone.t = 5.4; } }
+  if (G.powerOut) {
+    const p = G.po; p.t -= dt;
+    if (p.phase === 'dark' && p.t <= 0) { p.phase = 'music'; p.t = rnd(6, 18); }
+    else if (p.phase === 'music') {
+      p.nt -= dt;
+      if (p.nt <= 0) { const [m, b] = MELODY[p.note % MELODY.length]; AU.mbNote(m); p.nt = b * 0.38; p.note++; p.flash = Math.random() < 0.55; }
+      if (p.t <= 0) { p.phase = 'black'; p.t = rnd(2, 5); AU.steps(3, 0.6, 0.35); }
+    } else if (p.phase === 'black' && p.t <= 0) jumpscare('freddy');
+    return;
+  }
+  G.power -= (usage() * 0.09 + EXTRA[G.night]) * dt;
+  if (G.power <= 0) return powerOutStart();
+  for (const k of ['freddy', 'bonnie', 'chica']) { const a = G.a[k]; a.timer -= dt; if (a.timer <= 0) { a.timer += INTERVAL[k]; opportunity(k); } }
+  const f = G.foxy; f.timer -= dt;
+  if (f.timer <= 0) {
+    f.timer += 5.01;
+    if (!f.running && f.stage < 3 && !G.cam && ri(1, 20) <= G.ai.foxy) { f.stage++; if (f.stage === 3) { f.wait = 0; f.limit = rnd(18, 28); } }
+  }
+  if (f.stage === 3 && !f.running) {
+    f.wait += dt;
+    if ((G.cam && G.camId === '2A' && G.camAnim > 0.9) || f.wait > f.limit) { f.running = true; f.runT = 0; AU.foxyRun(); }
+  }
+  if (f.running) {
+    f.runT += dt;
+    if (f.runT >= 2.4) {
+      f.running = false;
+      if (G.doorLA > 0.9) { AU.knock(); G.power -= 1 + 5 * f.knocks; f.knocks++; f.stage = ri(0, 1); f.wait = 0; }
+      else return jumpscare('foxy');
+    }
+  }
+  if (G.inside) {
+    if (G.cam) G.inside.armed = true;
+    else if (G.inside.armed) return jumpscare(G.inside.who);
+    else { G.inside.t -= dt; if (G.inside.t <= 0) return jumpscare(G.inside.who); }
+  }
+  if (G.cam && G.camId === '6' && (at('6').length) && Math.random() < dt * 2.5) AU.clang();
+  G.ambT -= dt;
+  if (G.ambT <= 0) { G.ambT = rnd(20, 45); pick([() => AU.groan(), () => AU.steps(2, 0.7, 0.08), () => AU.clang()])(); }
+}
+
+function update(dt) {
+  G.t = (G.t || 0) + (G.state === 'play' ? 0 : dt);
+  if (G.state === 'intro') { G.introT += dt; if (G.introT > 3) { G.state = 'play'; AU.startLoops(); if (G.phone) AU.ring(); } }
+  else if (G.state === 'play') updatePlay(dt);
+  else if (G.state === 'jumpscare') { G.js.t += dt; if (G.js.t > 1.3) { G.state = 'over'; G.overT = 0; } }
+  else if (G.state === 'over') { G.overT += dt; if (G.overT > 6) toMenu(); }
+  else if (G.state === 'win') { G.winT += dt; if (G.winT > 10) toMenu(); }
+}
+
+// ============================================================ 各界面
+function menuItems() {
+  const it = [{ label: '新 游 戏', act: () => { SAVE.night = 1; save(); startNight(1); } }];
+  if (SAVE.night > 1) it.push({ label: `继 续　第 ${SAVE.night} 夜`, act: () => startNight(SAVE.night) });
+  if (SAVE.beat5) it.push({ label: '第 6 夜', act: () => startNight(6) });
+  if (SAVE.beat6) it.push({ label: '自定义之夜', act: () => { G = { state: 'custom', t: 0 }; } });
+  it.forEach((m, i) => { m.x = 90; m.y = 400 + i * 66; m.w = 420; m.h = 52; });
+  return it;
+}
+function drawMenu() {
+  const t = G.t;
+  const tw = Math.random() < 0.04;
+  ctx.save(); ctx.globalAlpha = tw ? 0.9 : 0.55 + Math.sin(t * 0.8) * 0.08;
+  drawChar('freddy', 920 + (tw ? rnd(-6, 6) : 0), 330, 2.3, { creepy: tw || Math.sin(t * 0.3) > 0.85, look: 0 });
+  ctx.restore();
+  const vg = ctx.createRadialGradient(900, 330, 100, 900, 330, 700); vg.addColorStop(0, 'rgba(0,0,0,0.1)'); vg.addColorStop(1, 'rgba(0,0,0,0.95)');
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  drawStatic(0.08 + (tw ? 0.25 : 0) + Math.random() * 0.05);
+  txt('玩具熊的', 90, 170, 78, '#f2f2f2', 'left', FCN, 'bold');
+  txt('午夜后宫', 90, 262, 78, '#f2f2f2', 'left', FCN, 'bold');
+  txt('FIVE NIGHTS', 96, 310, 40, '#999', 'left', FNUM);
+  for (const m of menuItems()) {
+    const hov = mouse.x > m.x && mouse.x < m.x + m.w && mouse.y > m.y - 40 && mouse.y < m.y + 12;
+    txt((hov ? '>> ' : '') + m.label, m.x, m.y, 40, hov ? '#fff' : '#bbb', 'left', FCN, 'bold');
+  }
+  txt('A / D 开关左右门　·　Q / E 门灯　·　空格 监控　·　鼠标靠边转头　·　Esc 返回', 90, 676, 18, '#777');
+  txt('同人致敬作品 · 仅供娱乐', 1250, 700, 16, '#555', 'right');
+}
+function drawCustom() {
+  drawStatic(0.06);
+  txt('自定义之夜', 640, 90, 56, '#fff', 'center', FCN, 'bold');
+  const ks = ['freddy', 'bonnie', 'chica', 'foxy'];
+  ks.forEach((k, i) => {
+    const x = 220 + i * 280;
+    ctx.fillStyle = '#151515'; rr(x - 110, 140, 220, 380, 10); ctx.fill();
+    ctx.save(); ctx.beginPath(); rr(x - 110, 140, 220, 380, 10); ctx.clip(); drawChar(k, x, 270, 0.95, {}); ctx.restore();
+    txt(CHARS[k].name, x, 560, 30, '#fff', 'center', FCN, 'bold');
+    txt('◀', x - 70, 622, 44, '#ccc', 'center', FNUM); txt('▶', x + 70, 622, 44, '#ccc', 'center', FNUM);
+    txt(String(SAVE.custom[i]), x, 624, 56, '#fff', 'center', FNUM);
+  });
+  txt('>> 开 始', 1100, 690, 34, '#fff', 'center', FCN, 'bold');
+  txt('返 回', 160, 690, 30, '#aaa', 'center', FCN, 'bold');
+}
+function drawIntro() {
+  const a = G.introT < 2.4 ? 1 : Math.max(0, 1 - (G.introT - 2.4) / 0.6);
+  ctx.globalAlpha = a;
+  txt('12:00 AM', 640, 330, 96, '#fff', 'center', FNUM);
+  txt(G.night === 7 ? '自定义之夜' : `第 ${G.night} 夜`, 640, 410, 44, '#fff', 'center', FCN, 'bold');
+  ctx.globalAlpha = 1;
+  drawStatic(G.introT < 0.4 ? 0.6 - G.introT : 0.04);
+}
+function drawPlay() {
+  if (G.cam && G.camAnim > 0.999) drawCamView();
+  else {
+    drawOffice();
+    if (G.camAnim > 0.001) {
+      const y = H * (1 - G.camAnim);
+      ctx.fillStyle = '#161616'; rr(60, y + 24, W - 120, H - 30, 26); ctx.fill();
+      ctx.fillStyle = '#050805'; rr(92, y + 56, W - 184, H - 96, 10); ctx.fill();
+    }
+  }
+  if (!G.powerOut) drawHUD();
+  drawPhone();
+}
+function drawJump() {
+  const t = G.js.t, who = G.js.who;
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const sx = rnd(-22, 22), sy = rnd(-18, 18);
+  const s = (who === 'foxy' ? 2.7 : 2.5) + Math.min(1, t * 2.5) * 0.9;
+  drawChar(who, 640 + sx, 400 + sy + (1 - Math.min(1, t * 4)) * 200, s, { mouth: 0.6 + 0.4 * Math.abs(Math.sin(t * 38)), glow: true, creepy: who !== 'foxy' && Math.sin(t * 50) > 0.3 });
+  flushGlow();
+  if (Math.random() < 0.25) { ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(0, 0, W, H); }
+  drawStatic(0.12);
+}
+function drawOver() {
+  drawStatic(G.overT < 2 ? 1 - G.overT * 0.4 : 0.25);
+  if (G.overT > 1.5) {
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, 0, W, H);
+    txt('GAME OVER', 640, 340, 110, '#fff', 'center', FNUM);
+    txt('你被塞进了玩偶服里……', 640, 410, 28, '#c33', 'center', FCN, 'bold');
+    if (G.overT > 2.5) txt('点击返回主菜单', 640, 480, 22, '#888', 'center');
+  }
+}
+function drawWin() {
+  const t = G.winT;
+  const p = clamp((t - 1.2) / 1.4, 0, 1), e = p * p * (3 - 2 * p);
+  ctx.save(); ctx.beginPath(); ctx.rect(400, 260, 220, 120); ctx.clip();
+  txt('5', 580, 360 - e * 120, 120, '#fff', 'right', FNUM); txt('6', 580, 480 - e * 120, 120, '#fff', 'right', FNUM);
+  ctx.restore();
+  txt('AM', 610, 360, 120, '#fff', 'left', FNUM);
+  if (t > 4) {
+    if (G.night >= 5) {
+      const msg = G.night === 5 ? '恭喜！你熬过了一整周。　工资：120.50 元' : G.night === 6 ? '加班完成！　加班费：0.50 元　·　自定义之夜已解锁' : '自定义之夜通关！你是真正的夜班之王。';
+      txt(msg, 640, 470, 30, '#ffd860', 'center', FCN, 'bold');
+    } else txt(`第 ${G.night} 夜 完成`, 640, 470, 30, '#ddd', 'center', FCN, 'bold');
+    if (t > 5) txt('点击继续', 640, 540, 22, '#888', 'center');
+  }
+}
+function render() {
+  ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  ({ menu: drawMenu, custom: drawCustom, intro: drawIntro, play: drawPlay, jumpscare: drawJump, over: drawOver, win: drawWin })[G.state]();
+  GLOW = [];
+}
+
+// ============================================================ 输入
+function toLogical(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; }
+const inBar = (x, y) => y > H - 56 && x > 340 && x < 840;
+cv.addEventListener('pointermove', e => {
+  const p = toLogical(e); mouse.x = p.x; mouse.y = p.y;
+  if (e.pointerType === 'mouse') {
+    mouse.active = true;
+    const b = inBar(p.x, p.y);
+    if (b && !mouse.inBar && G.state === 'play') toggleCam();
+    mouse.inBar = b;
+  }
+});
+cv.addEventListener('pointerleave', () => { mouse.active = false; });
+cv.addEventListener('pointerup', e => { if (e.pointerType !== 'mouse') mouse.active = false; });
+cv.addEventListener('pointerdown', e => {
+  AU.init();
+  const p = toLogical(e); mouse.x = p.x; mouse.y = p.y;
+  if (e.pointerType !== 'mouse') mouse.active = true;
+  onClick(p.x, p.y, e.pointerType);
+});
+function onClick(x, y, ptype) {
+  if (G.state === 'menu') { for (const m of menuItems()) if (x > m.x && x < m.x + m.w && y > m.y - 40 && y < m.y + 12) return m.act(); return; }
+  if (G.state === 'custom') {
+    for (let i = 0; i < 4; i++) {
+      const cx = 220 + i * 280;
+      if (y > 580 && y < 640) { if (Math.abs(x - (cx - 70)) < 30) SAVE.custom[i] = Math.max(0, SAVE.custom[i] - 1); if (Math.abs(x - (cx + 70)) < 30) SAVE.custom[i] = Math.min(20, SAVE.custom[i] + 1); }
+    }
+    save();
+    if (y > 650 && x > 1000) startNight(7, true);
+    if (y > 650 && x < 300) toMenu();
+    return;
+  }
+  if (G.state === 'over') { if (G.overT > 1.5) toMenu(); return; }
+  if (G.state === 'win') { if (G.winT > 4) toMenu(); return; }
+  if (G.state !== 'play') return;
+  if (G.phone && x < 150 && y < 60 && x > 20 && y > 20) { G.phone = null; return; }
+  if (inBar(x, y)) { if (ptype !== 'mouse') toggleCam(); return; }
+  if (G.cam) {
+    for (const [id, c] of Object.entries(CAMS)) if (x > MAP_X + c.x && x < MAP_X + c.x + 56 && y > MAP_Y + c.y && y < MAP_Y + c.y + 28) return switchCam(id);
+    return;
+  }
+  const wx = x + G.scroll;
+  for (const s of ['L', 'R']) {
+    const b = BTN[s];
+    if (Math.hypot(wx - b.x, y - b.door) < 30) return toggleDoor(s);
+    if (Math.hypot(wx - b.x, y - b.light) < 30) return toggleLight(s);
+  }
+}
+addEventListener('keydown', e => {
+  AU.init();
+  const k = e.key.toLowerCase();
+  if (k === ' ') e.preventDefault();
+  if (G.state === 'play') {
+    if (k === ' ' || k === 's') toggleCam();
+    else if (k === 'a') toggleDoor('L');
+    else if (k === 'd') toggleDoor('R');
+    else if (k === 'q') toggleLight('L');
+    else if (k === 'e') toggleLight('R');
+    else if (k === 'arrowleft') keys.scroll = -1;
+    else if (k === 'arrowright') keys.scroll = 1;
+    else if (k === 'escape') toMenu();
+  } else if (G.state === 'menu' && k === 'enter') menuItems()[menuItems().length > 1 ? 1 : 0].act();
+  else if ((G.state === 'over' && G.overT > 1.5) || (G.state === 'win' && G.winT > 4) || (G.state === 'custom' && k === 'escape')) toMenu();
+});
+addEventListener('keyup', e => { const k = e.key.toLowerCase(); if (k === 'arrowleft' || k === 'arrowright') keys.scroll = 0; });
+
+// ============================================================ 主循环
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  update(dt); render();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+// 调试钩子：?debug 时暴露状态，便于截图测试
+if (location.search.includes('debug')) window.__G = () => G, window.__api = { startNight, toggleCam, switchCam, toggleDoor, toggleLight, setG: (f) => f(G) };
+</script>
+</body>
+</html>

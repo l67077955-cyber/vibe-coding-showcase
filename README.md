@@ -26,3 +26,4 @@ with no external dependencies and no build step, served via GitHub Pages.
 
 Fan-made, non-commercial work, provided for educational purposes.
 *The Binding of Isaac* and *Repentance+* are &copy; Edmund McMillen / Nicalis.
+*Five Nights at Freddy's* is &copy; Scott Cawthon; Teddy Nights uses no original assets.
