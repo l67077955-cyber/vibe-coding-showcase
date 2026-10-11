@@ -52,6 +52,9 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .stat{background:var(--page);border:1px solid var(--border);border-radius:8px;padding:6px 10px}
 .stat .k{font-size:12px;color:var(--ink2)}
 .stat .v{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.diag{margin-top:8px;padding:8px 12px;border-radius:8px;border:1px solid var(--border);border-left-width:4px;background:var(--page);font-size:13px;color:var(--ink2);min-height:38px}
+.diag b{color:var(--ink)}
+.diag.good{border-left-color:var(--good)}.diag.warn{border-left-color:var(--warn)}.diag.crit{border-left-color:var(--crit)}
 .ctl .row{display:grid;grid-template-columns:44px minmax(0,1fr) 72px;align-items:center;gap:8px;margin:6px 0}
 .ctl .row label{font-weight:600}
 .ctl .row.small label{font-weight:400;font-size:12px;color:var(--ink2)}
@@ -109,6 +112,7 @@ kbd{font:12px ui-monospace,monospace;background:var(--chip);border:1px solid var
       <div class="stat"><div class="k">当前误差</div><div class="v" id="mErr">—</div></div>
       <div class="stat"><div class="k">误差积分 IAE</div><div class="v" id="mIae">—</div></div>
     </div>
+    <div class="diag" id="diag" role="status" aria-live="polite"></div>
   </section>
 
   <aside class="card ctl">
@@ -178,7 +182,7 @@ kbd{font:12px ui-monospace,monospace;background:var(--chip);border:1px solid var
   <h2 style="margin-top:14px">可以试试这些实验</h2>
   <ol class="tips">
     <li><b>无人机 + 「仅 P」</b>：飞机悬停在目标下方——推力要抵消重力，只有误差存在时 P 才出力。再加一点 K<sub>i</sub>，看积分项（橙线）慢慢爬升到 ≈ 9.8 N 托住它。</li>
-    <li><b>小车 + 「仅 P」</b>：静摩擦让小车停在离目标不远处不动了。I 项能把它“挤”过去。</li>
+    <li><b>加热炉 + 「仅 P」</b>：温度停在目标下方约 10 °C——维持温度需要持续加热来弥补散热，纯 P 必须“留着误差”才有输出。下方诊断栏会实时说明原因。</li>
     <li><b>无人机 + 「PID」，然后关掉「积分抗饱和」</b>：起飞阶段推力顶到上限，积分一路累加，到达目标后要很久才“放掉”，超调明显变大。</li>
     <li><b>关掉「微分先行」，把 T<sub>f</sub> 调到 0，再点设定值</b>：D 分量（绿线）出现巨大尖峰——这就是“微分冲击”。打开微分先行后尖峰消失。</li>
     <li><b>测量噪声调到 1</b>：K<sub>d</sub> 越大，控制量 u 越“毛”。加大 T<sub>f</sub> 可以平滑它，但太大会削弱 D 的阻尼作用。</li>
@@ -202,7 +206,7 @@ const G = 9.81, H = 0.001; // 物理步长
 const PLANTS = {
   cart: {
     name:'🚗 小车定位', yName:'位置', unit:'m', uName:'推力', uUnit:'N',
-    desc:'质量 1 kg 的小车在轨道上，受粘滞阻尼和库仑摩擦（静摩擦 1.5 N）。控制量是推力，目标是让小车停在指定位置。',
+    desc:'质量 1 kg 的小车在轨道上，受粘滞阻尼（0.6 N·s/m）。控制量是推力，目标是让小车停在指定位置。',
     hint:'点击轨道任意位置设置目标点。',
     spRange:[0,10,0.1], sp0:7, alt:[3,7], uLim:[-20,20], win:20, noise:0.05, band:0.1,
     ranges:{kp:[0,40,0.1], ki:[0,10,0.05], kd:[0,20,0.1]},
@@ -210,13 +214,10 @@ const PLANTS = {
     def:'PID',
     init(){ return {x:2, v:0}; },
     y(s){ return s.x; },
+    hold(){ return 0; },
     step(s, u, h){
-      const m = 1, b = 0.6, Fs = 1.5, Fc = 1.2;
-      if(Math.abs(s.v) < 1e-3 && Math.abs(u) <= Fs){ s.v = 0; return; }
-      const dir = s.v !== 0 ? Math.sign(s.v) : Math.sign(u);
-      const a = (u - b*s.v - Fc*dir)/m;
-      const v0 = s.v; s.v += a*h;
-      if(v0 !== 0 && v0*s.v < 0) s.v = 0;
+      const m = 1, b = 0.6;
+      s.v += (u - b*s.v)/m*h;
       s.x += s.v*h;
       if(s.x < -0.4){ s.x = -0.4; s.v = Math.max(0, s.v); }
       if(s.x > 10.4){ s.x = 10.4; s.v = Math.min(0, s.v); }
@@ -248,6 +249,7 @@ const PLANTS = {
     ranges:{kp:[0,30,0.1], ki:[0,15,0.05], kd:[0,15,0.1]},
     presets:{'仅 P':[5,0,0], 'PI':[5,1.5,0], 'PD':[5,0,3.5], 'PID':[8,3,5], '振荡':[20,10,1]},
     def:'PID',
+    hold(){ return G; }, holdWhy:'抵消重力',
     init(){ return {y:0, v:0, ph:0}; },
     y(s){ return s.y; },
     step(s, u, h){
@@ -288,6 +290,7 @@ const PLANTS = {
     ranges:{kp:[0,15,0.05], ki:[0,5,0.01], kd:[0,5,0.05]},
     presets:{'仅 P':[1.5,0,0], 'PI':[1.5,0.4,0], 'PD':[1.5,0,0.5], 'PID':[3,0.6,0.5], '振荡':[0.3,1,0]},
     def:'PI',
+    hold(r){ return 0.5*Math.sqrt(r); }, holdWhy:'补上底部持续流出的水',
     init(){ return {h:0.3, t:0}; },
     y(s){ return s.h; },
     out(s){ return 0.5*Math.sqrt(Math.max(s.h, 0)); },
@@ -331,6 +334,7 @@ const PLANTS = {
     ranges:{kp:[0,30,0.1], ki:[0,5,0.01], kd:[0,30,0.1]},
     presets:{'仅 P':[4,0,0], 'PI':[3,0.3,0], 'PD':[4,0,4], 'PID':[4,0.4,4], '振荡':[15,2,0]},
     def:'PID', L:2,
+    hold(r){ return (r - 20)/0.8; }, holdWhy:'弥补向环境的散热',
     init(){ const n = Math.round(this.L/H); return {T:20, buf:new Float32Array(n), k:0}; },
     y(s){ return s.T; },
     step(s, u, h){
@@ -381,7 +385,8 @@ const PLANTS = {
     spRange:[-5,5,0.1], sp0:0, alt:[-3,3], uLim:[-40,40], win:10, noise:0.2, band:0.2, y0:5,
     ranges:{kp:[0,5,0.01], ki:[0,3,0.01], kd:[0,1,0.005]},
     presets:{'仅 P':[1.2,0,0], 'PI':[1.2,0.5,0], 'PD':[1.2,0,0.25], 'PID':[1.5,0.5,0.3], '振荡':[3,0,0.04]},
-    def:'PD',
+    def:'PID',
+    hold(r){ return -G*Math.tan(r*Math.PI/180); }, holdWhy:'让摆杆保持倾斜，小车必须一直加速',
     init(){ return {th:5*Math.PI/180, w:0, x:0, v:0, fallen:false}; },
     y(s){ return s.th*180/Math.PI; },
     step(s, u, h){
@@ -628,6 +633,40 @@ function updateStats(){
   $('#mSettle').textContent = settled ? Math.max(0, met.lastOut - met.t0).toFixed(2) + ' s' : '未稳定';
   $('#mErr').textContent = fmt(sp - plant.y(ps)) + ' ' + u;
   $('#mIae').textContent = met.iae.toFixed(2);
+  diagnose(settled);
+}
+function diagnose(settled){
+  const show = (cls, html) => { const el = $('#diag'); el.className = 'diag ' + cls; el.innerHTML = html; };
+  const u = plant.unit, uu = plant.uUnit;
+  if(ps.fallen) return show('crit', '✕ <b>摆杆倒下了。</b>K<sub>p</sub> 太小、K<sub>d</sub> 不足或控制周期 T<sub>s</sub> 太长都会失稳。按「重置」再试。');
+  const tw = Math.min(3, plant.win*0.15);
+  if(t - met.t0 < tw) return show('', '… 响应进行中');
+  const i0 = lowerBound(rec.t, t - tw), n = rec.t.length - i0;
+  if(n < 2) return show('', '… 响应进行中');
+  let ymin = Infinity, ymax = -Infinity, esum = 0, sat = 0;
+  const [lo, hi] = plant.uLim;
+  for(let i = i0; i < rec.t.length; i++){
+    const y = rec.y[i]; ymin = Math.min(ymin, y); ymax = Math.max(ymax, y); esum += rec.sp[i] - y;
+    if(rec.u[i] >= hi - 1e-9 || rec.u[i] <= lo + 1e-9) sat++;
+  }
+  const em = esum/n, band = Math.max(0.02*Math.abs(met.sp - met.y0), plant.band), amp = (ymax - ymin)/2;
+  const need = plant.hold(sp);
+  if(settled) return show('good', `✓ <b>已稳定在目标附近</b>：误差 ${fmt(sp - plant.y(ps))} ${u}（允许带 ±${fmt(band)} ${u}）。`);
+  if(sat/n > 0.9){
+    const atHi = rec.u[rec.u.length - 1] >= hi - 1e-9, lim = atHi ? hi : lo;
+    const out = need > hi || need < lo;
+    return show('warn', `⚠ <b>执行器一直顶在${atHi ? '上' : '下'}限（${fmt(lim)} ${uu}）。</b>` +
+      (out ? `保持在这个目标需要约 ${fmt(need)} ${uu}，超出了执行器能力，换一个更近的目标。` : '正在全力追赶；若关闭了积分抗饱和，积分项可能已经“饱和”，之后会出现大超调。'));
+  }
+  if(amp > 2*band && Math.abs(em) < amp) return show('warn', `⚠ <b>在目标附近来回振荡</b>（幅度约 ±${fmt(amp)} ${u}）：减小 K<sub>p</sub> 或 K<sub>i</sub>，或适当增大 K<sub>d</sub>。`);
+  if(Math.abs(em) > band && gains.ki === 0){
+    const why = plant.holdWhy && Math.abs(need) > 1e-6
+      ? `要${plant.holdWhy}，${plant.uName}必须持续保持约 <b>${fmt(need)} ${uu}</b>；而纯比例项只有在误差不为 0 时才有输出，所以会“留着”一点误差来换取这份输出。`
+      : '';
+    return show('warn', `⚠ <b>稳态误差 ${fmt(em)} ${u}：没有积分项（K<sub>i</sub> = 0）。</b>${why}把 K<sub>i</sub> 调大一点就能消除。`);
+  }
+  if(Math.abs(em) > band) return show('', `… <b>正在逼近目标</b>（误差 ${fmt(em)} ${u}）：积分项在逐步累积${gains.ki < plant.ranges.ki[1]*0.05 ? '，K<sub>i</sub> 较小所以比较慢' : ''}。`);
+  show('', '… 已进入目标附近，等待稳定');
 }
 
 /* ---------------- 界面绑定 ---------------- */
