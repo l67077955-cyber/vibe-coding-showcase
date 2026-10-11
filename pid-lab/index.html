@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PID 控制实验室</title>
+<style>
+:root{
+  color-scheme:light;
+  --page:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;
+  --grid:#e1e0d9;--axis:#c3c2b7;--border:rgba(11,11,11,.10);
+  --s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--good:#0ca30c;--crit:#d03b3b;--warn:#c98500;
+  --chip:#f0efec;--water:rgba(42,120,214,.35);--hot:#eb6834;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --page:#0d0d0d;--surface:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#898781;
+    --grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,.10);
+    --s1:#3987e5;--s2:#d95926;--s3:#199e70;--good:#0ca30c;--crit:#e66767;--warn:#fab219;
+    --chip:#262624;--water:rgba(57,135,229,.40);--hot:#d95926;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --page:#0d0d0d;--surface:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#898781;
+  --grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,.10);
+  --s1:#3987e5;--s2:#d95926;--s3:#199e70;--good:#0ca30c;--crit:#e66767;--warn:#fab219;
+  --chip:#262624;--water:rgba(57,135,229,.40);--hot:#d95926;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--page);color:var(--ink);font:14px/1.6 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;padding:20px 16px 60px}
+.wrap{max-width:1180px;margin:0 auto}
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+h1{font-size:24px;letter-spacing:.5px}
+h1 small{font-size:13px;color:var(--ink2);font-weight:400;margin-left:8px}
+h2{font-size:16px;margin:0 0 10px}
+h3{font-size:14px;margin:0 0 4px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px}
+@media(max-width:920px){.layout{grid-template-columns:minmax(0,1fr)}}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+button{font:inherit;color:var(--ink);background:var(--chip);border:1px solid var(--border);border-radius:8px;padding:5px 12px;cursor:pointer}
+button:hover{border-color:var(--axis)}
+button.on{background:var(--s1);border-color:var(--s1);color:#fff}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+.desc{color:var(--ink2);font-size:13px;margin-bottom:8px;min-height:42px}
+#scene{width:100%;height:300px;display:block;border-radius:8px;background:var(--page);cursor:crosshair;touch-action:none}
+.hint{font-size:12px;color:var(--muted);margin-top:6px}
+.stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:10px}
+@media(max-width:560px){.stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.stat{background:var(--page);border:1px solid var(--border);border-radius:8px;padding:6px 10px}
+.stat .k{font-size:12px;color:var(--ink2)}
+.stat .v{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ctl .row{display:grid;grid-template-columns:44px minmax(0,1fr) 72px;align-items:center;gap:8px;margin:6px 0}
+.ctl .row label{font-weight:600}
+.ctl .row.small label{font-weight:400;font-size:12px;color:var(--ink2)}
+.ctl .row.small{grid-template-columns:86px minmax(0,1fr) 72px}
+input[type=range]{width:100%;accent-color:var(--s1)}
+input[type=number]{width:100%;font:inherit;font-variant-numeric:tabular-nums;background:var(--page);color:var(--ink);border:1px solid var(--border);border-radius:6px;padding:2px 6px}
+select{font:inherit;background:var(--page);color:var(--ink);border:1px solid var(--border);border-radius:6px;padding:2px 6px}
+.sec{border-top:1px solid var(--border);margin-top:10px;padding-top:10px}
+.sec-t{font-size:12px;color:var(--muted);letter-spacing:.5px;margin-bottom:4px}
+.presets,.btns{display:flex;gap:6px;flex-wrap:wrap}
+.check{display:flex;align-items:center;gap:6px;margin:4px 0;font-size:13px}
+.check input{accent-color:var(--s1)}
+.check small{color:var(--muted)}
+.charts{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;margin-top:14px}
+.chart-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--ink2)}
+.legend i{display:inline-block;width:16px;height:0;border-top:2px solid;vertical-align:middle;margin-right:5px}
+.legend i.dash{border-top-style:dashed}
+.chart{width:100%;height:220px;display:block;cursor:crosshair}
+#tip{position:fixed;pointer-events:none;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;box-shadow:0 4px 16px rgba(0,0,0,.15);display:none;z-index:10;font-variant-numeric:tabular-nums;white-space:nowrap}
+#tip .r{display:flex;justify-content:space-between;gap:14px}
+#tip .sw{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+.theory{margin-top:14px}
+.tgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:10px}
+@media(max-width:760px){.tgrid{grid-template-columns:minmax(0,1fr)}}
+.tcard{background:var(--page);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;color:var(--ink2)}
+.tcard h3{color:var(--ink)}
+.formula{font-size:17px;text-align:center;padding:10px;background:var(--page);border-radius:8px;border:1px solid var(--border);overflow-x:auto;white-space:nowrap}
+.formula .p{color:var(--s1)}.formula .i{color:var(--s2)}.formula .d{color:var(--s3)}
+ol.tips{margin:8px 0 0 20px;font-size:13px;color:var(--ink2)}
+ol.tips li{margin:3px 0}
+ol.tips b{color:var(--ink)}
+footer{margin-top:20px;font-size:12px;color:var(--muted)}
+a{color:var(--s1)}
+kbd{font:12px ui-monospace,monospace;background:var(--chip);border:1px solid var(--border);border-radius:4px;padding:0 4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>PID 控制实验室<small>拖动参数，实时看闭环响应</small></h1>
+  <button id="themeBtn" title="切换主题">主题：自动</button>
+</header>
+
+<div class="layout">
+  <section class="card">
+    <div class="tabs" id="tabs"></div>
+    <p class="desc" id="desc"></p>
+    <canvas id="scene"></canvas>
+    <p class="hint" id="hint"></p>
+    <div class="stats">
+      <div class="stat"><div class="k">上升时间 10→90%</div><div class="v" id="mRise">—</div></div>
+      <div class="stat"><div class="k">超调量</div><div class="v" id="mOs">—</div></div>
+      <div class="stat"><div class="k">调节时间 ±2%</div><div class="v" id="mSettle">—</div></div>
+      <div class="stat"><div class="k">当前误差</div><div class="v" id="mErr">—</div></div>
+      <div class="stat"><div class="k">误差积分 IAE</div><div class="v" id="mIae">—</div></div>
+    </div>
+  </section>
+
+  <aside class="card ctl">
+    <h2>控制器参数</h2>
+    <div class="row"><label for="kpR" style="color:var(--s1)">K<sub>p</sub></label><input type="range" id="kpR"><input type="number" id="kpN"></div>
+    <div class="row"><label for="kiR" style="color:var(--s2)">K<sub>i</sub></label><input type="range" id="kiR"><input type="number" id="kiN"></div>
+    <div class="row"><label for="kdR" style="color:var(--s3)">K<sub>d</sub></label><input type="range" id="kdR"><input type="number" id="kdN"></div>
+    <div class="sec-t" style="margin-top:8px">预设（点击后重新做一次阶跃）</div>
+    <div class="presets" id="presets"></div>
+
+    <div class="sec">
+      <div class="sec-t">设定值</div>
+      <div class="row small"><label for="spR" id="spLab">设定值</label><input type="range" id="spR"><input type="number" id="spN"></div>
+      <label class="check"><input type="checkbox" id="square"> 方波设定值 <small>（周期性来回切换）</small></label>
+    </div>
+
+    <div class="sec">
+      <div class="sec-t">控制器细节</div>
+      <label class="check"><input type="checkbox" id="aw" checked> 积分抗饱和 <small>（输出饱和时停止积分）</small></label>
+      <label class="check"><input type="checkbox" id="dmeas"> 微分先行 <small>（对测量值求导，消除设定值突变冲击）</small></label>
+      <div class="row small"><label for="tfR">微分滤波 T<sub>f</sub></label><input type="range" id="tfR" min="0" max="0.5" step="0.005"><input type="number" id="tfN" min="0" max="0.5" step="0.005"></div>
+      <div class="row small"><label for="tsR">控制周期 T<sub>s</sub></label><input type="range" id="tsR" min="0.005" max="0.3" step="0.005"><input type="number" id="tsN" min="0.005" max="0.3" step="0.005"></div>
+      <div class="row small"><label for="noR">测量噪声</label><input type="range" id="noR" min="0" max="1" step="0.01"><input type="number" id="noN" min="0" max="1" step="0.01"></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-t">仿真</div>
+      <div class="btns">
+        <button id="playBtn">⏸ 暂停</button>
+        <button id="resetBtn">↺ 重置</button>
+        <button id="kickBtn">💥 扰动</button>
+        <select id="speed" aria-label="仿真速度">
+          <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option>
+        </select>
+      </div>
+      <p class="hint">快捷键：<kbd>空格</kbd> 暂停 · <kbd>R</kbd> 重置 · <kbd>D</kbd> 扰动</p>
+    </div>
+  </aside>
+</div>
+
+<div class="charts">
+  <section class="card">
+    <div class="chart-h">
+      <h2 id="c1Title">被控量</h2>
+      <div class="legend"><span><i class="dash" style="border-color:var(--ink2)"></i>设定值 r</span><span><i style="border-color:var(--s1)"></i>测量值 y</span></div>
+    </div>
+    <canvas class="chart" id="chartY"></canvas>
+  </section>
+  <section class="card">
+    <div class="chart-h">
+      <h2 id="c2Title">控制量 u 与 P / I / D 分量</h2>
+      <div class="legend"><span><i style="border-color:var(--ink)"></i>u（实际输出）</span><span><i style="border-color:var(--s1)"></i>P</span><span><i style="border-color:var(--s2)"></i>I</span><span><i style="border-color:var(--s3)"></i>D</span><span><i class="dash" style="border-color:var(--muted)"></i>执行器上下限</span></div>
+    </div>
+    <canvas class="chart" id="chartU"></canvas>
+  </section>
+</div>
+
+<section class="card theory">
+  <h2>PID 是怎么工作的</h2>
+  <div class="formula">u(t) = <span class="p">K<sub>p</sub>·e(t)</span> + <span class="i">K<sub>i</sub>·∫e(τ)dτ</span> + <span class="d">K<sub>d</sub>·de(t)/dt</span>，&nbsp; e(t) = r(t) − y(t)</div>
+  <div class="tgrid">
+    <div class="tcard"><h3 style="color:var(--s1)">P · 比例：看现在</h3>误差越大，出力越大。K<sub>p</sub> 大则响应快，但过大会超调、振荡。只有 P 时，若系统需要持续出力才能保持（重力、散热、摩擦），就会留下<b>稳态误差</b>。</div>
+    <div class="tcard"><h3 style="color:var(--s2)">I · 积分：看过去</h3>把历史误差累加起来，只要还有误差就一直加力，最终消除稳态误差。代价是相位滞后：K<sub>i</sub> 太大会振荡；执行器饱和时还会<b>积分饱和</b>，导致大超调。</div>
+    <div class="tcard"><h3 style="color:var(--s3)">D · 微分：看未来</h3>根据误差变化的速度提前“刹车”，增加阻尼、抑制超调。但它会放大测量噪声，设定值突变时还会产生冲击，所以实际中常配合<b>微分滤波</b>和<b>微分先行</b>。</div>
+  </div>
+  <h2 style="margin-top:14px">可以试试这些实验</h2>
+  <ol class="tips">
+    <li><b>无人机 + 「仅 P」</b>：飞机悬停在目标下方——推力要抵消重力，只有误差存在时 P 才出力。再加一点 K<sub>i</sub>，看积分项（橙线）慢慢爬升到 ≈ 9.8 N 托住它。</li>
+    <li><b>小车 + 「仅 P」</b>：静摩擦让小车停在离目标不远处不动了。I 项能把它“挤”过去。</li>
+    <li><b>无人机 + 「PID」，然后关掉「积分抗饱和」</b>：起飞阶段推力顶到上限，积分一路累加，到达目标后要很久才“放掉”，超调明显变大。</li>
+    <li><b>关掉「微分先行」，把 T<sub>f</sub> 调到 0，再点设定值</b>：D 分量（绿线）出现巨大尖峰——这就是“微分冲击”。打开微分先行后尖峰消失。</li>
+    <li><b>测量噪声调到 1</b>：K<sub>d</sub> 越大，控制量 u 越“毛”。加大 T<sub>f</sub> 可以平滑它，但太大会削弱 D 的阻尼作用。</li>
+    <li><b>加热炉</b>有 2 秒纯滞后：K<sub>p</sub> 稍大就振荡，这是滞后系统难控的根源。</li>
+    <li><b>倒立摆 + 「仅 P」</b>：没有阻尼，摆杆来回摆动，而且离散控制的延迟让摆幅越来越大。换成「PD」立刻稳住；再把控制周期 T<sub>s</sub> 拉到 0.1 s 以上，它又会倒下。</li>
+  </ol>
+</section>
+
+<footer>单文件、零依赖、离线可用。仿真步长 1 ms（半隐式欧拉法），控制器按 T<sub>s</sub> 离散执行并零阶保持输出。 · <a href="../">返回作品集</a></footer>
+</div>
+<div id="tip"></div>
+
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function gauss(){ let u = 0; while(!u) u = Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*Math.random()); }
+const G = 9.81, H = 0.001; // 物理步长
+
+/* ---------------- 被控对象 ---------------- */
+const PLANTS = {
+  cart: {
+    name:'🚗 小车定位', yName:'位置', unit:'m', uName:'推力', uUnit:'N',
+    desc:'质量 1 kg 的小车在轨道上，受粘滞阻尼和库仑摩擦（静摩擦 1.5 N）。控制量是推力，目标是让小车停在指定位置。',
+    hint:'点击轨道任意位置设置目标点。',
+    spRange:[0,10,0.1], sp0:7, alt:[3,7], uLim:[-20,20], win:20, noise:0.05, band:0.1,
+    ranges:{kp:[0,40,0.1], ki:[0,10,0.05], kd:[0,20,0.1]},
+    presets:{'仅 P':[6,0,0], 'PI':[6,1.5,0], 'PD':[6,0,4], 'PID':[12,3,5], '振荡':[30,6,0.5]},
+    def:'PID',
+    init(){ return {x:2, v:0}; },
+    y(s){ return s.x; },
+    step(s, u, h){
+      const m = 1, b = 0.6, Fs = 1.5, Fc = 1.2;
+      if(Math.abs(s.v) < 1e-3 && Math.abs(u) <= Fs){ s.v = 0; return; }
+      const dir = s.v !== 0 ? Math.sign(s.v) : Math.sign(u);
+      const a = (u - b*s.v - Fc*dir)/m;
+      const v0 = s.v; s.v += a*h;
+      if(v0 !== 0 && v0*s.v < 0) s.v = 0;
+      s.x += s.v*h;
+      if(s.x < -0.4){ s.x = -0.4; s.v = Math.max(0, s.v); }
+      if(s.x > 10.4){ s.x = 10.4; s.v = Math.min(0, s.v); }
+    },
+    kick(s){ s.v += (Math.random() < .5 ? -1 : 1)*3; },
+    click(s, fx, fy, W){ const m = 40; return clamp((fx - m)/(W - 2*m)*10, 0, 10); },
+    draw(c, W, Hh, s, u, col){
+      const m = 40, X = x => m + x/10*(W - 2*m), gy = Hh*0.66;
+      c.strokeStyle = col.axis; c.lineWidth = 2; c.beginPath(); c.moveTo(m - 20, gy); c.lineTo(W - m + 20, gy); c.stroke();
+      c.fillStyle = col.muted; c.font = '11px system-ui'; c.textAlign = 'center';
+      for(let i = 0; i <= 10; i++){ c.fillRect(X(i) - .5, gy, 1, 6); c.fillText(i + ' m', X(i), gy + 20); }
+      // 目标
+      const tx = X(sp);
+      c.setLineDash([5,4]); c.strokeStyle = col.ink2; c.lineWidth = 1.5; c.beginPath(); c.moveTo(tx, gy); c.lineTo(tx, gy - 110); c.stroke(); c.setLineDash([]);
+      c.fillStyle = col.ink2; c.beginPath(); c.moveTo(tx, gy - 110); c.lineTo(tx + 18, gy - 103); c.lineTo(tx, gy - 96); c.fill();
+      // 小车
+      const cx = X(s.x);
+      c.fillStyle = col.s1; roundRect(c, cx - 30, gy - 40, 60, 28, 6); c.fill();
+      c.fillStyle = col.ink; [-17, 17].forEach(o => { c.beginPath(); c.arc(cx + o, gy - 8, 7, 0, 7); c.fill(); });
+      arrow(c, cx, gy - 26, cx + u/20*90, gy - 26, col.ink);
+      label(c, `x = ${s.x.toFixed(2)} m   v = ${s.v.toFixed(2)} m/s   F = ${u.toFixed(1)} N`, 14, 22, col);
+    }
+  },
+  drone: {
+    name:'🚁 无人机高度', yName:'高度', unit:'m', uName:'推力', uUnit:'N',
+    desc:'1 kg 无人机，受重力（9.81 N）和空气阻力。控制量是总推力（0–30 N）。悬停需要持续的推力，是理解积分作用的好例子。',
+    hint:'点击画面任意高度设置目标高度。',
+    spRange:[0,10,0.1], sp0:5, alt:[3,7], uLim:[0,30], win:20, noise:0.05, band:0.1,
+    ranges:{kp:[0,30,0.1], ki:[0,15,0.05], kd:[0,15,0.1]},
+    presets:{'仅 P':[5,0,0], 'PI':[5,1.5,0], 'PD':[5,0,3.5], 'PID':[8,3,5], '振荡':[20,10,1]},
+    def:'PID',
+    init(){ return {y:0, v:0, ph:0}; },
+    y(s){ return s.y; },
+    step(s, u, h){
+      const a = (u - G - 0.4*s.v);
+      s.v += a*h; s.y += s.v*h; s.ph += u*h*1.2;
+      if(s.y <= 0){ s.y = 0; if(s.v < 0) s.v = 0; }
+    },
+    kick(s){ s.v -= 4; },
+    click(s, fx, fy, W, Hh){ return clamp((Hh - 30 - fy)/(Hh - 50)*11, 0, 10); },
+    draw(c, W, Hh, s, u, col){
+      const Y = y => Hh - 30 - y/11*(Hh - 50), cx = W*0.55;
+      c.fillStyle = col.grid; c.fillRect(0, Hh - 30, W, 30);
+      c.fillStyle = col.muted; c.font = '11px system-ui'; c.textAlign = 'right';
+      for(let i = 0; i <= 10; i += 2){ c.fillRect(46, Y(i) - .5, 8, 1); c.fillText(i + ' m', 42, Y(i) + 4); }
+      c.fillRect(54, Y(10), 1, Y(0) - Y(10));
+      c.setLineDash([5,4]); c.strokeStyle = col.ink2; c.lineWidth = 1.5; c.beginPath(); c.moveTo(60, Y(sp)); c.lineTo(W - 20, Y(sp)); c.stroke(); c.setLineDash([]);
+      c.fillStyle = col.ink2; c.textAlign = 'left'; c.fillText('目标', W - 48, Y(sp) - 6);
+      const dy = Y(s.y) - 14;
+      c.strokeStyle = col.ink; c.lineWidth = 3; c.beginPath(); c.moveTo(cx - 44, dy); c.lineTo(cx + 44, dy); c.stroke();
+      c.fillStyle = col.s1; roundRect(c, cx - 18, dy - 6, 36, 14, 4); c.fill();
+      [-44, 44].forEach(o => {
+        const w = 22*Math.abs(Math.cos(s.ph*6 + o));
+        c.fillStyle = col.ink; c.fillRect(cx + o - 1.5, dy - 8, 3, 8);
+        c.strokeStyle = col.ink2; c.lineWidth = 2; c.beginPath(); c.ellipse(cx + o, dy - 9, Math.max(w, 2), 3, 0, 0, 7); c.stroke();
+      });
+      c.fillStyle = col.ink; [-12, 12].forEach(o => c.fillRect(cx + o - 1, dy + 8, 2, 6));
+      arrow(c, cx, dy - 14, cx, dy - 14 - u/30*80, col.ink);
+      arrow(c, cx + 62, dy, cx + 62, dy + G/30*80, col.muted);
+      c.fillStyle = col.muted; c.textAlign = 'left'; c.fillText('重力', cx + 68, dy + 20);
+      label(c, `h = ${s.y.toFixed(2)} m   v = ${s.v.toFixed(2)} m/s   推力 = ${u.toFixed(1)} N`, 14, 22, col);
+    }
+  },
+  tank: {
+    name:'💧 水箱液位', yName:'液位', unit:'m', uName:'进水流量', uUnit:'m³/s',
+    desc:'截面积 1 m² 的水箱，底部出水流量 ∝ √液位（非线性）。控制量是水泵进水流量（0–1.2 m³/s），液位越高需要的进水越多。',
+    hint:'点击水箱高度设置目标液位。',
+    spRange:[0.1,2,0.01], sp0:1.2, alt:[0.8,1.6], uLim:[0,1.2], win:40, noise:0.01, band:0.02,
+    ranges:{kp:[0,15,0.05], ki:[0,5,0.01], kd:[0,5,0.05]},
+    presets:{'仅 P':[1.5,0,0], 'PI':[1.5,0.4,0], 'PD':[1.5,0,0.5], 'PID':[3,0.6,0.5], '振荡':[0.3,1,0]},
+    def:'PI',
+    init(){ return {h:0.3, t:0}; },
+    y(s){ return s.h; },
+    out(s){ return 0.5*Math.sqrt(Math.max(s.h, 0)); },
+    step(s, u, h){ s.h += (Math.max(u, 0) - this.out(s))*h; s.h = clamp(s.h, 0, 2.5); s.t += h; },
+    kick(s){ s.h = Math.max(0, s.h - 0.3); },
+    geom(W, Hh){ const tw = Math.min(200, W*0.36), tx = W/2 - tw/2, top = 40, bot = Hh - 40; return {tw, tx, top, bot, Y: v => bot - v/2.5*(bot - top)}; },
+    click(s, fx, fy, W, Hh){ const g = this.geom(W, Hh); return clamp((g.bot - fy)/(g.bot - g.top)*2.5, 0.1, 2); },
+    draw(c, W, Hh, s, u, col){
+      const {tw, tx, top, bot, Y} = this.geom(W, Hh);
+      // 水
+      c.fillStyle = col.water; c.fillRect(tx, Y(s.h), tw, bot - Y(s.h));
+      c.strokeStyle = col.s1; c.lineWidth = 2; c.beginPath(); c.moveTo(tx, Y(s.h)); c.lineTo(tx + tw, Y(s.h)); c.stroke();
+      // 箱体
+      c.strokeStyle = col.ink; c.lineWidth = 3; c.beginPath(); c.moveTo(tx, top); c.lineTo(tx, bot); c.lineTo(tx + tw, bot); c.lineTo(tx + tw, top); c.stroke();
+      c.fillStyle = col.muted; c.font = '11px system-ui'; c.textAlign = 'left';
+      for(let v = 0; v <= 2.5; v += 0.5){ c.fillRect(tx + tw, Y(v) - .5, 8, 1); c.fillText(v.toFixed(1) + ' m', tx + tw + 12, Y(v) + 4); }
+      // 目标
+      c.setLineDash([5,4]); c.strokeStyle = col.ink2; c.lineWidth = 1.5; c.beginPath(); c.moveTo(tx - 10, Y(sp)); c.lineTo(tx + tw + 10, Y(sp)); c.stroke(); c.setLineDash([]);
+      c.fillStyle = col.ink2; c.textAlign = 'right'; c.fillText('目标 ' + sp.toFixed(2) + ' m', tx - 14, Y(sp) + 4);
+      // 进水管
+      const px = tx - 60, py = top - 18;
+      c.strokeStyle = col.ink2; c.lineWidth = 8; c.beginPath(); c.moveTo(px - 30, py); c.lineTo(tx + 24, py); c.lineTo(tx + 24, py + 10); c.stroke();
+      const wIn = Math.max(u, 0)/1.2*10;
+      if(wIn > 0.3){ c.fillStyle = col.s1; c.fillRect(tx + 24 - wIn/2, py + 12, wIn, Y(s.h) - py - 12); }
+      c.fillStyle = col.ink; c.beginPath(); c.arc(px, py, 14, 0, 7); c.fill();
+      c.save(); c.translate(px, py); c.rotate(s.t*u*6); c.strokeStyle = col.surface; c.lineWidth = 2;
+      for(let k = 0; k < 3; k++){ c.rotate(2.094); c.beginPath(); c.moveTo(0, 0); c.lineTo(9, 0); c.stroke(); } c.restore();
+      c.fillStyle = col.ink2; c.textAlign = 'center'; c.fillText('水泵', px, py + 30);
+      // 出水
+      const q = this.out(s), wOut = q/0.8*10;
+      c.strokeStyle = col.ink2; c.lineWidth = 8; c.beginPath(); c.moveTo(tx + tw, bot - 8); c.lineTo(tx + tw + 50, bot - 8); c.stroke();
+      if(wOut > 0.3){ c.fillStyle = col.s1; c.fillRect(tx + tw + 50, bot - 8 - wOut/2, 6, wOut); c.fillRect(tx + tw + 52, bot - 8, wOut*0.6, 40); }
+      label(c, `液位 = ${s.h.toFixed(3)} m   进水 = ${Math.max(u, 0).toFixed(3)}   出水 = ${q.toFixed(3)} m³/s`, 14, 22, col);
+    }
+  },
+  heater: {
+    name:'🔥 加热炉温度', yName:'温度', unit:'°C', uName:'加热功率', uUnit:'%',
+    desc:'一阶惯性 + 2 秒纯滞后：加热功率要过 2 秒才影响到温度传感器，时间常数 10 s，环境温度 20 °C，满功率稳态 100 °C。滞后让控制变得困难。',
+    hint:'点击右侧温度计设置目标温度。下方色带显示「已发出、还在路上」的加热功率。',
+    spRange:[20,90,0.5], sp0:60, alt:[45,65], uLim:[0,100], win:60, noise:0.3, band:0.5,
+    ranges:{kp:[0,30,0.1], ki:[0,5,0.01], kd:[0,30,0.1]},
+    presets:{'仅 P':[4,0,0], 'PI':[3,0.3,0], 'PD':[4,0,4], 'PID':[4,0.4,4], '振荡':[15,2,0]},
+    def:'PID', L:2,
+    init(){ const n = Math.round(this.L/H); return {T:20, buf:new Float32Array(n), k:0}; },
+    y(s){ return s.T; },
+    step(s, u, h){
+      const ud = s.buf[s.k]; s.buf[s.k] = clamp(u, 0, 100); s.k = (s.k + 1) % s.buf.length; s.ud = ud;
+      s.T += (0.8*ud - (s.T - 20))/10*h;
+    },
+    kick(s){ s.T -= 8; },
+    geom(W, Hh){ const tx = W*0.78, top = 40, bot = Hh - 70; return {tx, top, bot, Y: T => bot - (T - 10)/100*(bot - top)}; },
+    click(s, fx, fy, W, Hh){ const g = this.geom(W, Hh); return clamp(10 + (g.bot - fy)/(g.bot - g.top)*100, 20, 90); },
+    draw(c, W, Hh, s, u, col){
+      const {tx, top, bot, Y} = this.geom(W, Hh);
+      const p = (s.ud || 0)/100;
+      // 加热器
+      const hx = W*0.12, hy = Hh/2 - 30;
+      c.fillStyle = mix(col.axis, col.hot, p); roundRect(c, hx, hy, 70, 60, 8); c.fill();
+      c.strokeStyle = col.ink; c.lineWidth = 2;
+      for(let i = 0; i < 4; i++){ c.beginPath(); c.moveTo(hx + 12 + i*15, hy + 10); c.bezierCurveTo(hx + 22 + i*15, hy + 25, hx + 2 + i*15, hy + 35, hx + 12 + i*15, hy + 50); c.stroke(); }
+      c.fillStyle = col.ink2; c.font = '11px system-ui'; c.textAlign = 'center'; c.fillText('加热器 ' + (p*100).toFixed(0) + '%', hx + 35, hy + 78);
+      // 热浪
+      c.strokeStyle = mix(col.axis, col.hot, p); c.lineWidth = 2; c.globalAlpha = 0.3 + 0.7*p;
+      for(let i = 0; i < 3; i++){ c.beginPath(); const yy = hy + 12 + i*18; for(let x = hx + 80; x < tx - 120; x += 4){ const yv = yy + Math.sin(x*0.08 - performance.now()*0.004)*4; x === hx + 80 ? c.moveTo(x, yv) : c.lineTo(x, yv); } c.stroke(); }
+      c.globalAlpha = 1;
+      // 温度计
+      c.fillStyle = col.page; c.strokeStyle = col.ink; c.lineWidth = 2;
+      roundRect(c, tx - 9, top - 8, 18, bot - top + 16, 9); c.fill(); c.stroke();
+      c.beginPath(); c.arc(tx, bot + 18, 16, 0, 7); c.fillStyle = col.crit; c.fill(); c.stroke();
+      c.fillStyle = col.crit; c.fillRect(tx - 5, Y(clamp(s.T, 10, 110)), 10, bot + 6 - Y(clamp(s.T, 10, 110)));
+      c.fillStyle = col.muted; c.textAlign = 'left';
+      for(let T = 20; T <= 100; T += 20){ c.fillRect(tx + 10, Y(T) - .5, 6, 1); c.fillText(T + '°', tx + 20, Y(T) + 4); }
+      c.setLineDash([4,3]); c.strokeStyle = col.ink2; c.lineWidth = 1.5; c.beginPath(); c.moveTo(tx - 40, Y(sp)); c.lineTo(tx + 12, Y(sp)); c.stroke(); c.setLineDash([]);
+      c.fillStyle = col.ink2; c.textAlign = 'right'; c.fillText('目标 ' + sp.toFixed(1) + '°', tx - 44, Y(sp) + 4);
+      // 滞后色带
+      const bx = W*0.12, by = Hh - 34, bw = tx - 60 - bx, n = 50, len = s.buf.length;
+      for(let i = 0; i < n; i++){
+        const idx = (s.k + Math.floor(i/n*len)) % len; // i=0 最旧（即将生效）
+        c.fillStyle = mix(col.grid, col.hot, s.buf[idx]/100);
+        c.fillRect(bx + (i/n)*bw, by, bw/n - 1, 14);
+      }
+      c.fillStyle = col.muted; c.textAlign = 'left'; c.fillText('← 即将生效', bx, by - 5); c.textAlign = 'right'; c.fillText('刚发出 →', bx + bw, by - 5);
+      c.textAlign = 'center'; c.fillText('纯滞后 2 s 管道', bx + bw/2, by + 28);
+      label(c, `T = ${s.T.toFixed(1)} °C   当前指令 = ${clamp(u, 0, 100).toFixed(0)} %   生效功率 = ${(p*100).toFixed(0)} %`, 14, 22, col);
+    }
+  },
+  pend: {
+    name:'🤸 倒立摆', yName:'摆角', unit:'°', uName:'小车加速度', uUnit:'m/s²',
+    desc:'1 m 长的摆杆立在小车上，天生不稳定。控制量是小车加速度（±40 m/s²），只对角度做 PID（小车位置不控制，轨道循环）。摆角超过 85° 即判定倒下。',
+    hint:'点击画面左/右侧可以推一下摆杆。',
+    spRange:[-5,5,0.1], sp0:0, alt:[-3,3], uLim:[-40,40], win:10, noise:0.2, band:0.2, y0:5,
+    ranges:{kp:[0,5,0.01], ki:[0,3,0.01], kd:[0,1,0.005]},
+    presets:{'仅 P':[1.2,0,0], 'PI':[1.2,0.5,0], 'PD':[1.2,0,0.25], 'PID':[1.5,0.5,0.3], '振荡':[3,0,0.04]},
+    def:'PD',
+    init(){ return {th:5*Math.PI/180, w:0, x:0, v:0, fallen:false}; },
+    y(s){ return s.th*180/Math.PI; },
+    step(s, u, h){
+      if(s.fallen) return;
+      const a = u; // θ>0 表示向左倾
+      s.w += (G*Math.sin(s.th) + a*Math.cos(s.th))*h; s.th += s.w*h;
+      s.v += a*h; s.x += s.v*h;
+      if(Math.abs(s.th) > 85*Math.PI/180){ s.th = Math.sign(s.th)*90*Math.PI/180; s.w = 0; s.fallen = true; }
+    },
+    kick(s){ s.w += (Math.random() < .5 ? -1 : 1)*1.0; },
+    click(s, fx, fy, W){ s.w += fx < W/2 ? 1.0 : -1.0; return null; },
+    draw(c, W, Hh, s, u, col){
+      const gy = Hh - 50, sc = 70, span = (W - 40)/sc;
+      c.strokeStyle = col.axis; c.lineWidth = 2; c.beginPath(); c.moveTo(20, gy); c.lineTo(W - 20, gy); c.stroke();
+      const xr = ((s.x % span) + span) % span; const cx = 20 + xr*sc;
+      c.fillStyle = col.muted;
+      for(let i = 0; i < span; i++){ const xx = 20 + (((i - s.x) % span + span) % span)*sc; c.fillRect(xx, gy, 1, 6); }
+      c.fillStyle = col.s1; roundRect(c, cx - 30, gy - 30, 60, 22, 5); c.fill();
+      c.fillStyle = col.ink; [-18, 18].forEach(o => { c.beginPath(); c.arc(cx + o, gy - 6, 6, 0, 7); c.fill(); });
+      const L = 150, px = cx, py = gy - 30, ex = px - L*Math.sin(s.th), ey = py - L*Math.cos(s.th);
+      // 目标角度虚线
+      const ts = sp*Math.PI/180;
+      c.setLineDash([5,4]); c.strokeStyle = col.ink2; c.lineWidth = 1.5; c.beginPath(); c.moveTo(px, py); c.lineTo(px - L*Math.sin(ts), py - L*Math.cos(ts)); c.stroke(); c.setLineDash([]);
+      c.strokeStyle = col.ink; c.lineWidth = 5; c.lineCap = 'round'; c.beginPath(); c.moveTo(px, py); c.lineTo(ex, ey); c.stroke(); c.lineCap = 'butt';
+      c.fillStyle = s.fallen ? col.crit : col.s1; c.beginPath(); c.arc(ex, ey, 11, 0, 7); c.fill();
+      c.fillStyle = col.ink; c.beginPath(); c.arc(px, py, 4, 0, 7); c.fill();
+      arrow(c, cx, gy - 19, cx + u/40*90, gy - 19, col.ink);
+      label(c, `θ = ${(s.th*180/Math.PI).toFixed(2)}°   小车速度 = ${s.v.toFixed(2)} m/s   a = ${u.toFixed(1)} m/s²`, 14, 22, col);
+      if(s.fallen){ c.fillStyle = col.crit; c.font = 'bold 20px system-ui'; c.textAlign = 'center'; c.fillText('倒下了！按「重置」再来', W/2, 70); }
+    }
+  }
+};
+
+/* ---------------- 绘图小工具 ---------------- */
+function roundRect(c, x, y, w, h, r){ c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+function arrow(c, x1, y1, x2, y2, color){
+  const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy); if(len < 3) return;
+  const ux = dx/len, uy = dy/len;
+  c.strokeStyle = color; c.fillStyle = color; c.lineWidth = 2.5;
+  c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2 - ux*7, y2 - uy*7); c.stroke();
+  c.beginPath(); c.moveTo(x2, y2); c.lineTo(x2 - ux*9 - uy*5, y2 - uy*9 + ux*5); c.lineTo(x2 - ux*9 + uy*5, y2 - uy*9 - ux*5); c.fill();
+}
+function label(c, text, x, y, col){ c.fillStyle = col.ink2; c.font = '12px system-ui'; c.textAlign = 'left'; c.fillText(text, x, y); }
+function hex2rgb(h){ h = h.trim(); if(h.startsWith('rgb')){ const m = h.match(/[\d.]+/g); return m.slice(0, 3).map(Number); } h = h.replace('#', ''); return [0, 2, 4].map(i => parseInt(h.substr(i, 2), 16)); }
+function mix(a, b, t){ const A = hex2rgb(a), B = hex2rgb(b); t = clamp(t, 0, 1); return `rgb(${A.map((v, i) => Math.round(v + (B[i] - v)*t)).join(',')})`; }
+function prep(cv){
+  const dpr = window.devicePixelRatio || 1, r = cv.getBoundingClientRect();
+  const W = Math.max(1, Math.round(r.width)), Hh = Math.max(1, Math.round(r.height));
+  if(cv.width !== W*dpr || cv.height !== Hh*dpr){ cv.width = W*dpr; cv.height = Hh*dpr; }
+  const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, Hh);
+  return {c, W, H:Hh};
+}
+let col = {};
+function readColors(){
+  const cs = getComputedStyle(document.documentElement);
+  ['page','surface','ink','ink2','muted','grid','axis','s1','s2','s3','crit','water','hot'].forEach(k => col[k] = cs.getPropertyValue('--' + k).trim());
+}
+
+/* ---------------- 状态 ---------------- */
+let key = 'cart', plant = PLANTS.cart, ps, sp, t = 0, n = 0, running = true, speed = 1, square = false, squareNext = 0;
+const gains = {kp:0, ki:0, kd:0};
+const opts = {aw:true, dmeas:false, tf:0.05, ts:0.01, noise:0.1};
+let ctl, rec, met;
+
+function resetCtl(){ ctl = {integ:0, ePrev:0, yPrev:0, dF:0, u:0, P:0, I:0, D:0, first:true}; }
+function resetRec(){ rec = {t:[], sp:[], y:[], u:[], P:[], I:[], D:[]}; }
+function startStep(){
+  const y = plant.y(ps);
+  met = {t0:t, y0:y, sp, t10:null, t90:null, peak:0, lastOut:t, iae:0, done:false};
+}
+function resetSim(){
+  ps = plant.init(); t = 0; n = 0; resetCtl(); resetRec();
+  sp = plant.sp0; syncSp(); startStep();
+  squareNext = plant.win/2;
+}
+
+function controlTick(){
+  const ym = plant.y(ps) + opts.noise*plant.noise*gauss();
+  const Ts = opts.ts, e = sp - ym;
+  let deriv = 0;
+  if(!ctl.first) deriv = opts.dmeas ? -(ym - ctl.yPrev)/Ts : (e - ctl.ePrev)/Ts;
+  const a = opts.tf > 0 ? opts.tf/(opts.tf + Ts) : 0;
+  ctl.dF = a*ctl.dF + (1 - a)*deriv;
+  const P = gains.kp*e, D = gains.kd*ctl.dF;
+  let I = ctl.integ + gains.ki*e*Ts;
+  const [lo, hi] = plant.uLim;
+  let raw = P + I + D;
+  if(opts.aw && ((raw > hi && e > 0) || (raw < lo && e < 0))){ I = ctl.integ; raw = P + I + D; }
+  ctl.integ = I; ctl.P = P; ctl.I = I; ctl.D = D;
+  ctl.u = clamp(raw, lo, hi);
+  ctl.ePrev = e; ctl.yPrev = ym; ctl.first = false;
+}
+
+function advance(simDt){
+  const steps = Math.round(simDt/H);
+  const tsSteps = Math.max(1, Math.round(opts.ts/H));
+  for(let k = 0; k < steps; k++){
+    if(n % tsSteps === 0) controlTick();
+    plant.step(ps, ctl.u, H);
+    n++; t = n*H;
+    const y = plant.y(ps);
+    met.iae += Math.abs(sp - y)*H;
+    if(n % 10 === 0) record(y);
+    if(square && t >= squareNext){ setSp(Math.abs(sp - plant.alt[0]) < 1e-6 ? plant.alt[1] : plant.alt[0]); squareNext = t + plant.win/2; }
+  }
+}
+function record(y){
+  rec.t.push(t); rec.sp.push(sp); rec.y.push(y); rec.u.push(ctl.u); rec.P.push(ctl.P); rec.I.push(ctl.I); rec.D.push(ctl.D);
+  // 指标
+  const span = met.sp - met.y0;
+  if(Math.abs(span) > 1e-9){
+    const prog = (y - met.y0)/span;
+    if(met.t10 === null && prog >= 0.1) met.t10 = t;
+    if(met.t90 === null && prog >= 0.9) met.t90 = t;
+    met.peak = Math.max(met.peak, prog - 1);
+  }
+  const band = Math.max(0.02*Math.abs(span), plant.band);
+  if(Math.abs(y - met.sp) > band) met.lastOut = t;
+  // 裁剪历史
+  const keep = plant.win*100 + 200;
+  if(rec.t.length > keep*2){ for(const k in rec) rec[k] = rec[k].slice(-keep); }
+}
+
+/* ---------------- 图表 ---------------- */
+function niceTicks(lo, hi, count){
+  const span = hi - lo, raw = span/count, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 5, 10].map(m => m*mag).find(s => s >= raw) || raw;
+  const out = []; for(let v = Math.ceil(lo/step)*step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(10));
+  return out;
+}
+function fmt(v){ const a = Math.abs(v); return a >= 100 ? v.toFixed(0) : a >= 10 ? v.toFixed(1) : a >= 1 ? v.toFixed(2) : v.toFixed(3); }
+function lowerBound(arr, x){ let lo = 0, hi = arr.length; while(lo < hi){ const m = (lo + hi) >> 1; arr[m] < x ? lo = m + 1 : hi = m; } return lo; }
+
+let hoverT = null;
+const charts = {
+  y: {cv:$('#chartY'), series:[
+    {k:'sp', c:'ink2', w:1.5, dash:[6,4], name:'设定值 r'},
+    {k:'y', c:'s1', w:2, name:'测量值 y'}]},
+  u: {cv:$('#chartU'), series:[
+    {k:'P', c:'s1', w:1.5, name:'P'},
+    {k:'I', c:'s2', w:1.5, name:'I'},
+    {k:'D', c:'s3', w:1.5, name:'D'},
+    {k:'u', c:'ink', w:2, name:'u'}]}
+};
+const PAD = {l:52, r:56, t:10, b:24};
+function chartGeom(cv){ const r = cv.getBoundingClientRect(); return {W:r.width, H:r.height}; }
+function tRange(){ const win = plant.win, t1 = Math.max(t, win); return [t1 - win, t1]; }
+
+function drawChart(ch, which){
+  const {c, W, H:Hh} = prep(ch.cv);
+  const [t0, t1] = tRange();
+  const i0 = Math.max(0, lowerBound(rec.t, t0) - 1), i1 = rec.t.length;
+  let lo, hi;
+  if(which === 'y'){
+    lo = Infinity; hi = -Infinity;
+    for(let i = i0; i < i1; i++){ lo = Math.min(lo, rec.y[i], rec.sp[i]); hi = Math.max(hi, rec.y[i], rec.sp[i]); }
+    const [a, b] = plant.spRange; const minSpan = (b - a)*0.25;
+    if(!isFinite(lo)){ lo = a; hi = b; }
+    if(hi - lo < minSpan){ const m = (hi + lo)/2; lo = m - minSpan/2; hi = m + minSpan/2; }
+  } else {
+    const [a, b] = plant.uLim; lo = a; hi = b;
+    for(let i = i0; i < i1; i++) for(const s of ch.series){ const v = rec[s.k][i]; if(v < lo) lo = v; if(v > hi) hi = v; }
+    const span = b - a; lo = Math.max(lo, a - span*0.6); hi = Math.min(hi, b + span*0.6);
+  }
+  const pad = (hi - lo)*0.08; lo -= pad; hi += pad;
+  const X = tt => PAD.l + (tt - t0)/(t1 - t0)*(W - PAD.l - PAD.r);
+  const Y = v => PAD.t + (hi - v)/(hi - lo)*(Hh - PAD.t - PAD.b);
+  // 网格与刻度
+  c.font = '11px system-ui'; c.fillStyle = col.muted; c.lineWidth = 1;
+  c.textAlign = 'right';
+  for(const v of niceTicks(lo, hi, 5)){ const y = Math.round(Y(v)) + .5; c.strokeStyle = col.grid; c.beginPath(); c.moveTo(PAD.l, y); c.lineTo(W - PAD.r, y); c.stroke(); c.fillText(fmt(v), PAD.l - 6, y + 4); }
+  c.textAlign = 'center';
+  for(const v of niceTicks(t0, t1, 8)){ const x = Math.round(X(v)) + .5; c.fillText(v.toFixed(0) + 's', x, Hh - 6); }
+  c.strokeStyle = col.axis; c.beginPath(); c.moveTo(PAD.l, Hh - PAD.b + .5); c.lineTo(W - PAD.r, Hh - PAD.b + .5); c.stroke();
+  c.save(); c.translate(12, (Hh - PAD.b + PAD.t)/2); c.rotate(-Math.PI/2); c.fillText(which === 'y' ? `${plant.yName} (${plant.unit})` : `${plant.uName} (${plant.uUnit})`, 0, 0); c.restore();
+  // 执行器限幅
+  if(which === 'u'){
+    c.setLineDash([3,3]); c.strokeStyle = col.muted;
+    for(const v of plant.uLim){ const y = Math.round(Y(v)) + .5; c.beginPath(); c.moveTo(PAD.l, y); c.lineTo(W - PAD.r, y); c.stroke(); }
+    c.setLineDash([]);
+  }
+  // 曲线
+  c.save(); c.beginPath(); c.rect(PAD.l, PAD.t, W - PAD.l - PAD.r, Hh - PAD.t - PAD.b); c.clip();
+  c.lineJoin = 'round';
+  const ends = [];
+  for(const s of ch.series){
+    const arr = rec[s.k]; if(i1 - i0 < 2) continue;
+    c.strokeStyle = col[s.c]; c.lineWidth = s.w; c.setLineDash(s.dash || []);
+    c.beginPath();
+    const stride = Math.max(1, Math.floor((i1 - i0)/(W*1.5)));
+    for(let i = i0; i < i1; i += stride){ const x = X(rec.t[i]), y = Y(arr[i]); i === i0 ? c.moveTo(x, y) : c.lineTo(x, y); }
+    c.lineTo(X(rec.t[i1 - 1]), Y(arr[i1 - 1]));
+    c.stroke(); c.setLineDash([]);
+    ends.push({s, y:clamp(Y(arr[i1 - 1]), PAD.t + 6, Hh - PAD.b - 4), x:X(rec.t[i1 - 1])});
+  }
+  // 悬停十字线
+  if(hoverT !== null && hoverT >= t0 && hoverT <= t1 && rec.t.length){
+    const i = clamp(lowerBound(rec.t, hoverT), 0, rec.t.length - 1);
+    const x = X(rec.t[i]);
+    c.strokeStyle = col.axis; c.lineWidth = 1; c.beginPath(); c.moveTo(x, PAD.t); c.lineTo(x, Hh - PAD.b); c.stroke();
+    for(const s of ch.series){ const y = Y(rec[s.k][i]); c.fillStyle = col[s.c]; c.strokeStyle = col.surface; c.lineWidth = 2; c.beginPath(); c.arc(x, y, 4, 0, 7); c.fill(); c.stroke(); }
+  }
+  c.restore();
+  // 直接标签（末端）
+  ends.sort((a, b) => a.y - b.y);
+  for(let i = 1; i < ends.length; i++) if(ends[i].y - ends[i - 1].y < 13) ends[i].y = ends[i - 1].y + 13;
+  c.textAlign = 'left'; c.font = '11px system-ui';
+  for(const e of ends){
+    const lx = Math.min(e.x, W - PAD.r) + 6;
+    c.fillStyle = col[e.s.c]; c.fillRect(lx, e.y - 1, 8, 2);
+    c.fillStyle = col.ink2; c.fillText(e.s.name.split(' ')[0], lx + 11, e.y + 4);
+  }
+}
+
+const tip = $('#tip');
+function onHover(ev){
+  const cv = ev.currentTarget, r = cv.getBoundingClientRect();
+  const [t0, t1] = tRange();
+  const x = ev.clientX - r.left;
+  if(x < PAD.l || x > r.width - PAD.r || !rec.t.length){ hoverT = null; tip.style.display = 'none'; return; }
+  hoverT = t0 + (x - PAD.l)/(r.width - PAD.l - PAD.r)*(t1 - t0);
+  const i = clamp(lowerBound(rec.t, hoverT), 0, rec.t.length - 1);
+  const row = (cc, name, v, u) => `<div class="r"><span>${cc ? `<span class="sw" style="background:${col[cc]}"></span>` : ''}${name}</span><b>${fmt(v)} ${u || ''}</b></div>`;
+  tip.innerHTML = `<div style="color:${col.muted}">t = ${rec.t[i].toFixed(2)} s</div>` +
+    row('ink2', '设定值', rec.sp[i], plant.unit) + row('s1', plant.yName, rec.y[i], plant.unit) +
+    row(null, '误差', rec.sp[i] - rec.y[i], plant.unit) +
+    row('ink', plant.uName, rec.u[i], plant.uUnit) + row('s1', 'P', rec.P[i]) + row('s2', 'I', rec.I[i]) + row('s3', 'D', rec.D[i]);
+  tip.style.display = 'block';
+  const tw = tip.offsetWidth, th = tip.offsetHeight;
+  let lx = ev.clientX + 16; if(lx + tw > innerWidth - 8) lx = ev.clientX - tw - 16;
+  tip.style.left = lx + 'px'; tip.style.top = clamp(ev.clientY - th/2, 8, innerHeight - th - 8) + 'px';
+}
+for(const ch of Object.values(charts)){
+  ch.cv.addEventListener('pointermove', onHover);
+  ch.cv.addEventListener('pointerleave', () => { hoverT = null; tip.style.display = 'none'; });
+}
+
+/* ---------------- 指标显示 ---------------- */
+function updateStats(){
+  const span = met.sp - met.y0, u = plant.unit;
+  $('#mRise').textContent = (met.t10 !== null && met.t90 !== null) ? (met.t90 - met.t10).toFixed(2) + ' s' : '—';
+  $('#mOs').textContent = Math.abs(span) > 1e-9 && met.t90 !== null ? (met.peak*100).toFixed(1) + ' %' : (Math.abs(span) > 1e-9 ? '—' : '—');
+  const settled = t - met.lastOut > Math.min(2, plant.win*0.1);
+  $('#mSettle').textContent = settled ? Math.max(0, met.lastOut - met.t0).toFixed(2) + ' s' : '未稳定';
+  $('#mErr').textContent = fmt(sp - plant.y(ps)) + ' ' + u;
+  $('#mIae').textContent = met.iae.toFixed(2);
+}
+
+/* ---------------- 界面绑定 ---------------- */
+function bindPair(rId, nId, get, set){
+  const r = $(rId), nI = $(nId);
+  r.addEventListener('input', () => { set(+r.value); nI.value = r.value; });
+  nI.addEventListener('change', () => { let v = +nI.value; if(isNaN(v)) v = get(); set(v); r.value = v; nI.value = v; });
+  return v => { r.value = v; nI.value = +(+v).toFixed(4); };
+}
+const setKp = bindPair('#kpR', '#kpN', () => gains.kp, v => gains.kp = Math.max(0, v));
+const setKi = bindPair('#kiR', '#kiN', () => gains.ki, v => gains.ki = Math.max(0, v));
+const setKd = bindPair('#kdR', '#kdN', () => gains.kd, v => gains.kd = Math.max(0, v));
+const setTf = bindPair('#tfR', '#tfN', () => opts.tf, v => opts.tf = clamp(v, 0, 2));
+const setTs = bindPair('#tsR', '#tsN', () => opts.ts, v => opts.ts = clamp(v, 0.001, 1));
+const setNo = bindPair('#noR', '#noN', () => opts.noise, v => opts.noise = clamp(v, 0, 5));
+const setSpUi = bindPair('#spR', '#spN', () => sp, v => setSp(v, true));
+function setSp(v, fromUi){
+  const [a, b] = plant.spRange; v = clamp(v, a, b);
+  if(Math.abs(v - sp) < 1e-9) return;
+  sp = v; if(!fromUi) syncSp(); startStep();
+}
+function syncSp(){ setSpUi(sp); }
+setTf(opts.tf); setTs(opts.ts); setNo(opts.noise);
+$('#aw').addEventListener('change', e => opts.aw = e.target.checked);
+$('#dmeas').addEventListener('change', e => opts.dmeas = e.target.checked);
+$('#square').addEventListener('change', e => { square = e.target.checked; squareNext = t; });
+$('#speed').addEventListener('change', e => speed = +e.target.value);
+
+function setRange(id, [a, b, s]){ for(const el of [$(id + 'R'), $(id + 'N')]){ el.min = a; el.max = b; el.step = s; } }
+function applyGains([kp, ki, kd]){ gains.kp = kp; gains.ki = ki; gains.kd = kd; setKp(kp); setKi(ki); setKd(kd); }
+function selectPlant(k){
+  key = k; plant = PLANTS[k];
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.k === k));
+  $('#desc').textContent = plant.desc; $('#hint').textContent = plant.hint;
+  setRange('#kp', plant.ranges.kp); setRange('#ki', plant.ranges.ki); setRange('#kd', plant.ranges.kd);
+  setRange('#sp', plant.spRange); $('#spLab').textContent = `${plant.yName} (${plant.unit})`;
+  $('#c1Title').textContent = `被控量：${plant.yName}`;
+  $('#c2Title').textContent = `控制量：${plant.uName} 与 P / I / D 分量`;
+  const pr = $('#presets'); pr.innerHTML = '';
+  for(const [name, g] of Object.entries(plant.presets)){
+    const b = document.createElement('button'); b.textContent = name;
+    b.onclick = () => { applyGains(g); markPreset(name); resetSim(); };
+    pr.appendChild(b);
+  }
+  applyGains(plant.presets[plant.def]); markPreset(plant.def);
+  resetSim();
+}
+function markPreset(name){ document.querySelectorAll('#presets button').forEach(b => b.classList.toggle('on', b.textContent === name)); }
+['#kpR','#kiR','#kdR','#kpN','#kiN','#kdN'].forEach(id => $(id).addEventListener('input', () => markPreset(null)));
+
+const tabs = $('#tabs');
+for(const [k, p] of Object.entries(PLANTS)){
+  const b = document.createElement('button'); b.textContent = p.name; b.dataset.k = k; b.onclick = () => selectPlant(k); tabs.appendChild(b);
+}
+const playBtn = $('#playBtn');
+function togglePlay(){ running = !running; playBtn.textContent = running ? '⏸ 暂停' : '▶ 继续'; }
+playBtn.onclick = togglePlay;
+$('#resetBtn').onclick = resetSim;
+$('#kickBtn').onclick = () => plant.kick(ps);
+addEventListener('keydown', e => {
+  if(e.target.matches('input[type=number], select')) return;
+  if(e.code === 'Space'){ e.preventDefault(); togglePlay(); }
+  else if(e.key === 'r' || e.key === 'R') resetSim();
+  else if(e.key === 'd' || e.key === 'D') plant.kick(ps);
+});
+const scene = $('#scene');
+scene.addEventListener('pointerdown', e => {
+  const r = scene.getBoundingClientRect();
+  const v = plant.click(ps, e.clientX - r.left, e.clientY - r.top, r.width, r.height);
+  if(v !== null && v !== undefined){ setSp(+v.toFixed(2)); square = false; $('#square').checked = false; }
+});
+
+/* 主题 */
+const themes = ['auto', 'light', 'dark'], tName = {auto:'自动', light:'浅色', dark:'深色'};
+let theme = 'auto';
+try { theme = localStorage.getItem('pid-theme') || 'auto'; } catch(e){}
+function applyTheme(){
+  if(theme === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.dataset.theme = theme;
+  $('#themeBtn').textContent = '主题：' + tName[theme]; readColors();
+}
+$('#themeBtn').onclick = () => { theme = themes[(themes.indexOf(theme) + 1) % 3]; try { localStorage.setItem('pid-theme', theme); } catch(e){} applyTheme(); };
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readColors);
+applyTheme();
+
+/* ---------------- 主循环 ---------------- */
+let last = performance.now(), statTimer = 0;
+function frame(now){
+  const dt = Math.min(0.05, (now - last)/1000); last = now;
+  if(running) advance(dt*speed);
+  const {c, W, H:Hh} = prep(scene);
+  plant.draw(c, W, Hh, ps, ctl.u, col);
+  drawChart(charts.y, 'y'); drawChart(charts.u, 'u');
+  statTimer += dt; if(statTimer > 0.1){ statTimer = 0; updateStats(); }
+  requestAnimationFrame(frame);
+}
+selectPlant('cart');
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
