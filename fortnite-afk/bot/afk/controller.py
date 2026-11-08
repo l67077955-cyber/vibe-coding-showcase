@@ -234,7 +234,13 @@ class AfkController:
             hwnd = self.window.find()
             if hwnd:
                 self.hwnd = hwnd
-                log.info("Fortnite window: hwnd=0x%X", hwnd)
+                if getattr(self.window, "screen_only", False):
+                    rect = self.window.client_rect()
+                    log.info("screen-only mode: capturing %dx%d at (%d,%d); "
+                             "no window handle is used", rect.width, rect.height,
+                             rect.left, rect.top)
+                else:
+                    log.info("Fortnite window: hwnd=0x%X", hwnd)
                 if self.cfg.safety.focus_on_start:
                     self.window.focus(hwnd)
                     self._sleep(1.0)

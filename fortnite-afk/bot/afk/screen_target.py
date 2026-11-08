@@ -22,6 +22,8 @@ user32 = ctypes.WinDLL("user32", use_last_error=True)
 class ScreenTarget:
     """Duck-types the old GameWindow so the state machine is unchanged."""
 
+    screen_only = True
+
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
 
