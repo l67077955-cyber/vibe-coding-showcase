@@ -314,7 +314,10 @@ def explore_questions() -> dict[str, Any]:
                     "You are the player in a first-person view. Choose the single operation the "
                     "player should perform now: move, jump, interact, attack, aim, reload, look, "
                     "or stop. Pick the operation that best reaches loot, explores the map and "
-                    "avoids getting stuck."
+                    "avoids getting stuck. The player controls: W/A/S/D move, Space jumps, "
+                    "E interacts, the LEFT mouse button fires the equipped weapon, the RIGHT "
+                    "mouse button aims down sights, R reloads. If an enemy is visible and a "
+                    "weapon is ready, shooting is usually the right answer."
                 ),
                 "criteria": {
                     "move_forward": "Walk straight ahead.",
@@ -472,6 +475,26 @@ def explore_questions() -> dict[str, Any]:
                     "because the current view is a wall, empty sky, or a dead end?"
                 ),
             },
+            "enemy": {
+                "type": "box",
+                "instructions": (
+                    "The nearest visible enemy player. Tight box around their body."
+                ),
+            },
+            "enemy_visible": {
+                "type": "noul",
+                "instructions": (
+                    "Is an enemy player visible in the image? Teammates do not count. "
+                    "Look for a hostile character, name plate, or muzzle flash."
+                ),
+            },
+            "weapon_ready": {
+                "type": "noul",
+                "instructions": (
+                    "Is a weapon equipped and ready to fire? The weapon slot and ammo "
+                    "counter are visible at the bottom right of the screen."
+                ),
+            },
         }
     )
     return q
@@ -497,6 +520,7 @@ FAST_EXPLORE_KEYS = (
     "screen", "action", "hold", "repeat",
     "target_visible", "target", "target_kind", "target_distance",
     "interact_ready", "path", "obstacle_ahead", "hazard_ahead",
+    "enemy", "enemy_visible", "weapon_ready",
 )
 
 

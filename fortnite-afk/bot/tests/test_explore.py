@@ -27,6 +27,24 @@ class ExplorePlanTests(unittest.TestCase):
         self.cfg = Config()
         self.rng = random.Random(1)
 
+    def test_enemy_visible_triggers_attack(self):
+        obs = observation(
+            action={"type": "choice", "choice": "move_forward", "confidence": 0.8,
+                    "probabilities": {}},
+            hold={"type": "choice", "choice": "tap", "confidence": 0.7,
+                  "probabilities": {}},
+            enemy=box_answer(Box(0.60, 0.40, 0.72, 0.62)),
+            enemy_visible={"type": "noul", "noul": 0.92},
+            weapon_ready={"type": "noul", "noul": 0.85},
+            path={"type": "choice", "choice": "clear", "confidence": 0.9,
+                  "probabilities": {}},
+        )
+        plan = plan_explore(obs, self.cfg, self.rng, chest_ready=True)
+        self.assertEqual(plan.action, "attack")
+        self.assertEqual(plan.mouse, "left")
+        self.assertGreater(plan.aim_norm, 0.0)
+        self.assertIn("enemy", plan.reason)
+
     def test_near_chest_interacts(self):
         obs = observation(
             move={"type": "choice", "choice": "forward", "confidence": 0.9,

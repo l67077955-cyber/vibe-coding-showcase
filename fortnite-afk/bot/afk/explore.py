@@ -233,8 +233,22 @@ def _plan_action(obs: Observation, cfg: Config, rng: random.Random, *,
         aim_norm = max(-0.5, min(0.5, target_box.center[0] - 0.5))
         aim_norm_y = max(-0.5, min(0.5, target_box.center[1] - 0.5))
 
+    # Combat outranks looting: if an enemy is in front of a ready weapon, put
+    # the crosshair on them and pull the left mouse button.
+    enemy_box = box("enemy")
+    enemy_visible = obs.noul("enemy_visible") or 0.0
+    weapon_ready = obs.noul("weapon_ready") or 0.0
+    enemy_engaged = (enemy_box is not None and enemy_visible >= 0.55
+                     and weapon_ready >= 0.45)
+    if enemy_engaged:
+        aim_norm = max(-0.5, min(0.5, enemy_box.center[0] - 0.5))
+        aim_norm_y = max(-0.5, min(0.5, enemy_box.center[1] - 0.5))
+
     reason = f"model action {action}"
-    if (chest_ready and target_is_object
+    if enemy_engaged:
+        action = "attack"
+        reason = "enemy visible with a ready weapon -> aim and fire"
+    elif (chest_ready and target_is_object
             and target_visible >= cfg.explore.chest_min_presence
             and target_near and interact_ready >= 0.40):
         action = "interact"

@@ -42,7 +42,8 @@ import random  # noqa: E402
 
 from afk.capture import ScreenCapture  # noqa: E402
 from afk.config import load_config  # noqa: E402
-from afk.explore import describe, plan_explore  # noqa: E402
+from afk.explore import (describe, frame_signature, plan_explore,  # noqa: E402
+                         signature_similarity)
 from afk.geometry import Rect  # noqa: E402
 from afk.jev import JevClient, JevError, TransportError  # noqa: E402
 from afk.motion import CameraNoise, aim_px, aim_py, plan_turn  # noqa: E402
@@ -119,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     steps: list[dict] = []
     last_interact_at = -999.0
     last_aim: tuple[float, int] | None = None
+    last_sig: tuple[int, ...] = ()
     started = time.monotonic()
 
     try:
@@ -126,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
         while args.steps == 0 or index < args.steps:
             index += 1
             frame = capture.grab(rect)
+            sig = frame_signature(frame)
             luma = mean_luma(frame)
             stamp_t = time.monotonic() - started
             if luma < cfg.cloud.black_frame_min_luma:
@@ -153,7 +156,12 @@ def main(argv: list[str] | None = None) -> int:
 
             chest_ready = (time.monotonic() - last_interact_at) >= cfg.explore.chest_cooldown_s
             plan = plan_explore(obs, cfg, rng, chest_ready=chest_ready)
+            _, action_conf = obs.choice("action")
+            similarity = (round(signature_similarity(last_sig, sig), 4)
+                          if last_sig else None)
+            last_sig = sig
             print(f"[{index:02d}] {stamp_t:6.1f}s luma={luma:5.1f} api={api_s:4.2f}s "
+                  f"act={action_conf:.2f} sim={similarity if similarity is not None else '-'} "
                   f"| {describe(plan)} | {plan.reason}")
 
             if last_aim is not None and plan.aim_norm:
@@ -174,6 +182,17 @@ def main(argv: list[str] | None = None) -> int:
                     last_interact_at = time.monotonic()
                 elif plan.jump:
                     inputs.press("space", 0.08)
+                elif plan.mouse:
+                    # Left button fires, right button aims. Without this branch
+                    # the model could choose attack and nothing would happen.
+                    cx = rect.left + rect.width // 2
+                    cy = rect.top + rect.height // 2
+                    if plan.hold_s <= 0.2:
+                        inputs.click(cx, cy, button=plan.mouse)
+                    else:
+                        inputs.mouse_down(plan.mouse)
+                        time.sleep(min(plan.hold_s, 1.2))
+                        inputs.mouse_up(plan.mouse)
                 elif plan.keys and plan.continuous:
                     new = {k.lower() for k in plan.keys}
                     for key in held - new:
@@ -187,8 +206,8 @@ def main(argv: list[str] | None = None) -> int:
                     held.clear()
                     inputs.hold(list(plan.keys), min(plan.hold_s, 1.2))
 
-                if plan.aim_norm or plan.aim_norm_y:
-                    turn_px = 0
+                if plan.aim_norm or plan.aim_norm_y or plan.look_dx:
+                    turn_px = int(plan.look_dx or 0)
                     turn_py = 0
                     if plan.aim_norm:
                         turn_px = aim_px(0.5 + plan.aim_norm, frame.width,
@@ -213,7 +232,11 @@ def main(argv: list[str] | None = None) -> int:
             steps.append({
                 "index": index, "time": round(stamp_t, 1), "luma": round(luma, 1),
                 "api_s": round(api_s, 2), "png": png,
-                "screen": obs.screen, "plan": describe(plan), "reason": plan.reason,
+                "screen": obs.screen, "action_conf": round(action_conf, 3),
+                "similarity": similarity, "keys": list(plan.keys),
+                "interact": bool(plan.interact), "jump": bool(plan.jump),
+                "aim": round(plan.aim_norm, 3), "aim_y": round(plan.aim_norm_y, 3),
+                "plan": describe(plan), "reason": plan.reason,
             })
             if args.interval > 0:
                 time.sleep(args.interval)
