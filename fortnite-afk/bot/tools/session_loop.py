@@ -124,7 +124,10 @@ class Session:
         self.no_move = 0
         self.leave_attempts = 0
         self.bus_steps = 0
+        self.chest_ready_at = 0.0
         self.last_sim = None
+        self.last_action = ""
+        self.same_action = 0
 
     # ---------------------------------------------------------------- input
     def release(self) -> None:
@@ -201,7 +204,8 @@ class Session:
         return record
 
     def plan_from(self, obs, frame):
-        plan = plan_explore(obs, self.cfg, random.Random(), chest_ready=True)
+        plan = plan_explore(obs, self.cfg, random.Random(),
+                            chest_ready=time.monotonic() >= self.chest_ready_at)
         _, conf = obs.choice("action")
         return plan, conf
 
@@ -211,6 +215,22 @@ class Session:
                if self.last_sig else None)
         self.last_sig = frame_signature(frame)
         self.last_sim = sim
+
+        # Same verb three decisions in a row while the picture barely changes:
+        # the plan is not working (usually jumping at a wall the model believes
+        # is low). Turn away so the next answer sees a different view.
+        if plan.action and plan.action == self.last_action and sim is not None and sim >= 0.90:
+            self.same_action += 1
+        else:
+            self.same_action = 1
+        self.last_action = plan.action
+        if self.same_action >= 3:
+            self.same_action = 0
+            self.release()
+            self.turn(random.choice((-1, 1)) * random.randint(220, 320))
+            return {"layer": "match", "plan": "stuck escape", "keys": [],
+                    "similarity": sim, "merged": [],
+                    "reason": f"{plan.action} repeated with no progress"}
 
         # Start the legs before the camera: holding W/D first and turning
         # second means the character walks a curve. Turning first and moving
@@ -230,9 +250,17 @@ class Session:
             dy = aim_py(0.5 + plan.aim_norm_y, frame.height, self.turn_cfg,
                         gain=self.aim_gain) if plan.aim_norm_y else 0
             self.turn(dx, dy)
+        elif plan.look_dx:
+            # look_left / look_right are planned as a pixel delta on the same
+            # eased profile as aiming. Without this branch the camera never
+            # actually moved and every scan decision was a no-op.
+            self.turn(plan.look_dx)
         if plan.interact:
             self.release()
             self.inputs.press(self.cfg.explore.interact_key, 0.12)
+            # One press per chest. The model keeps seeing the same box while the
+            # open animation runs, and hammering E on it burns whole decisions.
+            self.chest_ready_at = time.monotonic() + 3.0
         elif plan.jump:
             self.inputs.press("space", 0.08)
         elif plan.mouse:
