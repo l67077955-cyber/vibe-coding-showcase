@@ -88,3 +88,29 @@ DROP_QUESTIONS: dict[str, Any] = {
         "instructions": "Is a clear landing area visible?",
     },
 }
+
+SENSITIVITY_QUESTIONS: dict[str, Any] = {
+    "view_shift": {
+        "type": "choice",
+        "instructions": (
+            "Two frames are shown: BEFORE a mouse movement and AFTER it. "
+            "The mouse moved a known number of pixels horizontally. "
+            "How much did the camera view rotate between them?"
+        ),
+        "criteria": {
+            "none": "The two frames look identical; the view did not move at all.",
+            "small": "The view moved only a little; most landmarks are still in the same place.",
+            "good": "The view clearly rotated, roughly a quarter to half of the screen.",
+            "large": "The view rotated more than half a screen, or the scene is completely different.",
+        },
+    },
+    "turn_direction": {
+        "type": "choice",
+        "instructions": "Which way did the view turn between BEFORE and AFTER?",
+        "criteria": {
+            "left": "The scene shifted right, so the camera turned left.",
+            "right": "The scene shifted left, so the camera turned right.",
+            "unchanged": "The view did not turn.",
+        },
+    },
+}

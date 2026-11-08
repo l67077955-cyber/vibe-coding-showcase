@@ -277,6 +277,33 @@ class JevClient:
     def ask(self, frame: Frame, questions: dict[str, Any], *, context: str = "") -> Observation:
         started = time.monotonic()
         body = self._body(frame, questions)
+        return self._finish(body, questions, started, context)
+
+    def ask_pair(self, before: Frame, after: Frame, questions: dict[str, Any],
+                 *, context: str = "") -> Observation:
+        """Two frames in one call: what changed between them.
+
+        Sensitivity is about the relationship between a mouse delta and the
+        resulting camera angle, and that relationship only exists across two
+        frames. Showing the model both - labelled BEFORE and AFTER - lets it
+        judge "barely moved / about right / way too far" directly, instead of
+        the code guessing from a single image.
+        """
+        started = time.monotonic()
+        state: list[dict[str, Any]] = [
+            {"type": "text", "text": SYSTEM_TEXT},
+            {"type": "text", "text": "BEFORE the mouse movement:"},
+            {"type": "image_url",
+             "image_url": {"url": "data:image/png;base64," + before.png_base64()}},
+            {"type": "text", "text": "AFTER the mouse movement:"},
+            {"type": "image_url",
+             "image_url": {"url": "data:image/png;base64," + after.png_base64()}},
+        ]
+        body = {"model": self.cfg.model, "state": state, "questions": questions}
+        return self._finish(body, questions, started, context)
+
+    def _finish(self, body: dict[str, Any], questions: dict[str, Any],
+                started: float, context: str) -> Observation:
         encode_ms = (time.monotonic() - started) * 1000.0
         if context and isinstance(body["state"], list):
             body["state"].append({"type": "text", "text": context})

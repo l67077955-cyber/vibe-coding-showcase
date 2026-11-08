@@ -271,14 +271,17 @@ def main(argv: list[str] | None = None) -> int:
                     new = {k.lower() for k in plan.keys}
                     for key in held - new:
                         inputs.key_up(key)
+                        print(f"       key up   {key}  (t={stamp_t:.1f}s)")
                     for key in new - held:
                         inputs.key_down(key)
+                        print(f"       key down {key}  (t={stamp_t:.1f}s, held across decisions)")
                     held = new
                 elif plan.keys:
                     for key in list(held):
                         inputs.key_up(key)
                     held.clear()
                     inputs.hold(list(plan.keys), min(plan.hold_s, 1.2))
+                    print(f"       tap      {plan.keys} {min(plan.hold_s, 1.2):.2f}s")
 
                 if plan.aim_norm or plan.aim_norm_y or plan.look_dx:
                     turn_px = int(plan.look_dx or 0)
