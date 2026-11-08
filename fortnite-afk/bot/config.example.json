@@ -10,8 +10,6 @@
   "key_mode": "both",
   "request_timeout_s": 45.0,
   "max_retries": 3,
-  "window_class": "UnrealWindow",
-  "window_title": "Fortnite",
   "capture": {
     "max_width": 768,
     "inset_left": 0,

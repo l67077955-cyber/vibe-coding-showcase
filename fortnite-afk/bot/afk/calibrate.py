@@ -14,7 +14,7 @@ from .jev import JevClient, Observation
 from .png import draw_rect
 from .screens import questions_for
 from .win32 import client_rect as get_client_rect
-from .win32 import find_window
+from .screen_target import ScreenTarget
 
 log = logging.getLogger(__name__)
 
@@ -51,18 +51,16 @@ def calibrate(cfg: Config, profile: str, image: str | None = None) -> Path:
         frame = Frame.from_png_file(image)
         source = f"image {image}"
     else:
-        hwnd = find_window(cfg.window_class, cfg.window_title)
-        if not hwnd:
-            raise RuntimeError(
-                "Fortnite window not found. Start the game, or use --image <screenshot.png>."
-            )
-        rect = Rect(*get_client_rect(hwnd))
+        # Screen-only build: no window lookup, just the configured rectangle
+        # (or the whole screen).
+        target = ScreenTarget(cfg)
+        rect = target.client_rect()
         capture = ScreenCapture(
             cfg.capture.max_width, cfg.capture.inset_left, cfg.capture.inset_top,
             cfg.capture.inset_right, cfg.capture.inset_bottom,
         )
         frame = capture.grab(rect)
-        source = f"hwnd=0x{hwnd:X} rect={rect}"
+        source = f"screen rect={rect}"
 
     client = JevClient(cfg)
     questions = questions_for(profile)

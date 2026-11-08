@@ -20,12 +20,12 @@ from afk.calibrate import calibrate
 from afk.capture import ScreenCapture
 from afk.config import (APP_DIR, Config, ConfigError, apply_overrides, config_summary,
                         load_config, resolve_api_key)
-from afk.controller import AfkController, Fatal, GameWindow
+from afk.controller import AfkController, Fatal
+from afk.screen_target import ScreenTarget
 from afk.geometry import Rect
 from afk.jev import JevClient, JevError, check_api
 from afk.vision import JevVision
-from afk.win32 import (client_rect, enable_dpi_awareness, find_window,
-                       is_foreground, is_minimized, make_input)
+from afk.win32 import enable_dpi_awareness, make_input
 
 log = logging.getLogger("fortnite_afk")
 
@@ -83,8 +83,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     print("Reminder: automation violates Epic's terms and can get the account banned.\n")
 
     client, vision = _client_and_vision(cfg)
-    window = GameWindow(cfg)
-    inputs = make_input(cfg, window, rng=random.Random())
+    window = ScreenTarget(cfg)
+    inputs = make_input(cfg, rng=random.Random())
     controller = AfkController(
         cfg,
         window=window,
@@ -184,50 +184,32 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             problems += 1
 
     enable_dpi_awareness()
-    hwnd = find_window(cfg.window_class, cfg.window_title)
-    if not hwnd:
-        print("game window: NOT FOUND (start Fortnite before a live run)")
+    region = cfg.capture.region
+    if region:
+        rect = Rect(*region)
+        print(f"capture region: {region[0]},{region[1]} {region[2]}x{region[3]} (from config)")
     else:
-        try:
-            rect = client_rect(hwnd)
-            print(f"game window: hwnd=0x{hwnd:X} rect={rect} "
-                  f"foreground={is_foreground(hwnd)} minimised={is_minimized(hwnd)}")
-            capture = ScreenCapture(cfg.capture.max_width)
-            frame = capture.grab(Rect(*rect))
-            out = APP_DIR / cfg.logging.dir / "doctor.png"
-            out.parent.mkdir(parents=True, exist_ok=True)
-            frame.save_png(out)
-            print(f"capture: PASS {frame.width}x{frame.height} luma={mean_luma(frame):.1f} -> {out}")
-        except Exception as exc:
-            print(f"capture: FAIL - {exc}")
+        rect = ScreenTarget(cfg).client_rect()
+        print(f"capture region: whole screen {rect.width}x{rect.height} "
+              f"(no window handle is used)")
+    try:
+        capture = ScreenCapture(cfg.capture.max_width)
+        frame = capture.grab(rect)
+        out = APP_DIR / cfg.logging.dir / "doctor.png"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        frame.save_png(out)
+        luma = mean_luma(frame)
+        print(f"capture: PASS {frame.width}x{frame.height} luma={luma:.1f} -> {out}")
+        if luma < cfg.cloud.black_frame_min_luma:
+            print("capture: WARNING the screen is black; the game may be minimised, "
+                  "the display asleep, or the session locked")
             problems += 1
+    except Exception as exc:
+        print(f"capture: FAIL - {exc}")
+        problems += 1
 
     print(f"\nresult: {'PASS' if problems == 0 else f'{problems} problem(s)'}")
     return 0 if problems == 0 else 1
-
-
-def cmd_keytest(args: argparse.Namespace) -> int:
-    from afk.keytest import key_test
-
-    print(BANNER)
-    print("Input backend test: a window will open and receive one W keypress.\n")
-    results = key_test(args.key)
-    sendinput = results.get("sendinput") or {}
-    postmessage = results.get("postmessage") or {}
-    send_ok = int(sendinput.get("keydown", 0)) > 0
-    post_ok = int(postmessage.get("keydown", 0)) > 0
-    print()
-    if send_ok and int(sendinput.get("char", 0)) > 0:
-        print("SendInput: OK (keydown + WM_CHAR). Use input_backend='sendinput'.")
-    elif send_ok:
-        print("SendInput: keydown arrives but WM_CHAR does not. Movement keys may work; "
-              "text fields may not.")
-    else:
-        print("SendInput: no keydown reached the window. Try running as administrator, "
-              "or use input_backend='postmessage'.")
-    print("PostMessage: " + ("OK (keydown arrives)." if post_ok
-                             else "FAILED; this session blocks direct window messages too."))
-    return 0 if (send_ok or post_ok) else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -265,10 +247,6 @@ def build_parser() -> argparse.ArgumentParser:
     doc.add_argument("--no-api", action="store_true")
     doc.add_argument("--log-level", default=None)
     doc.set_defaults(func=cmd_doctor)
-
-    kt = sub.add_parser("keytest", help="test SendInput/PostMessage keyboard delivery")
-    kt.add_argument("--key", default="w")
-    kt.set_defaults(func=cmd_keytest)
 
     return parser
 

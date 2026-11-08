@@ -36,6 +36,10 @@ class CaptureConfig:
     inset_top: int = 0
     inset_right: int = 0
     inset_bottom: int = 0
+    # Screen rectangle to capture: [x, y, w, h]. None = the whole screen.
+    # There is no window handle anywhere in this build, so this is the only
+    # way to narrow the capture to the game.
+    region: tuple[int, int, int, int] | None = None
 
 
 @dataclass
@@ -153,12 +157,10 @@ class Config:
     api_key_file: str = ""
     api_key: str = ""  # prefer the environment variable; kept for local overrides
     proxy: str = "auto"  # auto | none | http://127.0.0.1:7890
-    input_backend: str = "sendinput"  # sendinput | postmessage | hybrid
+    input_backend: str = "sendinput"  # the only mode: global SendInput
     key_mode: str = "both"  # both | scancode | virtualkey (sendinput only)
     request_timeout_s: float = 45.0
     max_retries: int = 3
-    window_class: str = "UnrealWindow"
-    window_title: str = "Fortnite"
     capture: CaptureConfig = field(default_factory=CaptureConfig)
     turn: TurnConfig = field(default_factory=TurnConfig)
     confidence: ConfidenceConfig = field(default_factory=ConfidenceConfig)
@@ -241,8 +243,8 @@ def load_config(path: str | Path | None = None) -> Config:
 def validate(cfg: Config) -> None:
     if cfg.backend not in ("openrouter", "typesafe"):
         raise ConfigError("backend must be 'openrouter' or 'typesafe'")
-    if cfg.input_backend not in ("sendinput", "postmessage", "hybrid"):
-        raise ConfigError("input_backend must be 'sendinput', 'postmessage' or 'hybrid'")
+    if cfg.input_backend != "sendinput":
+        raise ConfigError("input_backend must be 'sendinput'; this build has no other mode")
     if cfg.key_mode not in ("both", "scancode", "virtualkey"):
         raise ConfigError("key_mode must be 'both', 'scancode' or 'virtualkey'")
     if not cfg.api_url.startswith("https://"):

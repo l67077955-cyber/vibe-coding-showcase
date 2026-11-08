@@ -39,13 +39,10 @@ C:\Users\computer\Documents\notes\fortnite-afk\
 ### 1.3 三步自检
 
 ```powershell
-# 1) 环境、Key、API、窗口、截图、会话状态
+# 1) 环境、Key、API、截图、会话状态（不取窗口句柄）
 .\FortniteAFK.exe doctor
 
-# 2) 键盘注入测试（会弹一个测试窗口）
-.\FortniteAFK.exe keytest
-
-# 3) 抓当前画面，让 Jev 识别按钮并画框，生成 HTML 报告
+# 2) 抓当前画面，让 Jev 识别按钮并画框，生成 HTML 报告
 .\FortniteAFK.exe calibrate --profile lobby
 .\FortniteAFK.exe calibrate --profile explore
 .\FortniteAFK.exe calibrate --profile menu
@@ -238,43 +235,17 @@ Box 没有“未找到”答案，所以每个 Box 都配一个 `<name>_visible`
 - **Jev API 正常**：`typesafe/jev-1.14` 返回 Choice/Noul/Box，单次约 `$0.00006–0.00013`。
 - **键盘 WM_KEYDOWN 能到窗口**，但 **SendInput 的 WM_CHAR 为 0**（见下）。
 
-### 4.2 键盘注入的坑
+### 4.2 输入注入：只有 SendInput 一种模式
 
-`keytest` 在 2026-11-08 这台海马会话里的结果：
+这个版本删掉了 `postmessage` / `hybrid` 两个后端，也删掉了 `keytest` 命令。原因很直接：两种后端都需要窗口句柄，而现在的约束是**不取任何游戏窗口句柄**。
 
-```
-sendinput    keydown=1 keyup=1 char=0
-postmessage  keydown=1 keyup=1 char=1
-```
+- 输入只有一条路径：`SendInput`（`key_mode` 仍可选 `both / scancode / virtualkey`）。
+- 没有 `FindWindow`、没有 `client_rect`、没有前台检查、没有 `PostMessage`。
+- 屏幕截图也只走 `GetDC(NULL) + BitBlt`，取整屏或 `capture.region` 指定的矩形。
 
-含义：
+早期 `keytest` 的记录（仅供历史参考）：`sendinput keydown=1 keyup=1 char=0`、`postmessage keydown=1 keyup=1 char=1`。`WM_CHAR=0` 影响的只是文本/聊天输入，移动键走 keydown/raw input，不受影响。
 
-- `SendInput` 的按键**能进入系统队列**，也会产生 `WM_KEYDOWN`，但不会产生 `WM_CHAR`。游戏移动通常只读 keydown/raw input，所以可能仍能动；文本输入/聊天框会失效。
-- `PostMessage` 直接往窗口投递消息，`WM_KEYDOWN + WM_CHAR` 都能到。
-- **Fortnite 使用 Unreal + EAC，可能忽略 PostMessage 的局内按键**；`SendInput` 则可能被 EAC/云桌面的键盘过滤影响。必须用 `keytest` + 进游戏按 W 实测。
-
-配置里可切换：
-
-```json
-"input_backend": "sendinput",   // 本地/普通 Windows 首选
-"key_mode": "both"               // both | scancode | virtualkey
-```
-
-或：
-
-```json
-"input_backend": "postmessage"   // 键盘和鼠标都走窗口消息，兼容 SDL/GLFW
-```
-
-或：
-
-```json
-"input_backend": "hybrid"        // 键盘 PostMessage + 鼠标 SendInput
-```
-
-`hybrid` 适合“鼠标能点、键盘 SendInput 被过滤”的云桌面：局外按钮仍用真实鼠标，局内 WASD 用窗口消息。Fortnite 是否接受窗口消息的局内按键要实测。
-
-如果两种都不行，只能上**硬件 HID**（Arduino Leonardo / Pro Micro 模拟真实键盘，云电脑需支持 USB 透传）或联系云厂商确认是否放行模拟输入。软件层的 `Interception` 驱动需要管理员和驱动安装，云电脑通常不允许。
+如果你需要换一种注入方式，那是另一套实现，不在这个构建里；也不会在运行期切换。
 
 ### 4.3 开源 3D 游戏实测：Jev 决定往哪走
 
@@ -282,11 +253,12 @@ postmessage  keydown=1 keyup=1 char=1
 
 命令：
 
-```powershell
-python tools\jev_walk_demo.py --title Luanti --steps 10 `
-  --goal "walk toward the nearest tree trunk" `
-  --backend postmessage --hold 0.7 --pause 0.8
+```text
+（历史记录）python tools\jev_walk_demo.py --title Luanti --steps 10
+  --goal "walk toward the nearest tree trunk" --hold 0.7 --pause 0.8
 ```
+
+> 这个工具属于旧的“按窗口标题找窗口”版本，已随单模式改造删除；下面的数据和报告保留为历史证据。
 
 实际输出（干净的一次，10/10 步都选中 forward）：
 
@@ -427,7 +399,7 @@ turn +320px
 ```jsonc
 {
   "model": "typesafe/jev-1.14",
-  "input_backend": "sendinput",     // sendinput | postmessage | hybrid
+  "input_backend": "sendinput",     // 唯一模式；没有 postmessage / hybrid
   "key_mode": "both",               // both | scancode | virtualkey
 
   "mode": {
@@ -508,7 +480,7 @@ Jev 按图片 token 计费，实测一帧 1280×720 约 `$0.00006–0.00013`。
 | 截图全黑 / `black frame` | 改 Fortnite 为窗口化全屏；云桌面断开后虚拟显示器会黑屏，重连或调 `cloud` 配置；确认没有锁屏。 |
 | `PLAY button rejected` | 跑 `calibrate --profile lobby` 看置信度；降低 `confidence.box`（例如 0.28）或提高 `capture.max_width`。 |
 | 模式检查一直失败 | 手动选好零建造/小队/填充；或临时 `mode.setup="off"`；或 `calibrate --profile lobby` 检查 `selected_mode` 识别。 |
-| 点了没反应 | 用 `keytest` 确认键盘；Fortnite 可能拦截 SendInput/PostMessage，需硬件 HID；确认游戏是前台、鼠标没被锁定。 |
+| 点了没反应 | 确认游戏在前台且鼠标没被锁定；本构建只发 `SendInput`，没有窗口消息后备；仍不行只能上硬件 HID。 |
 | 宝箱不开 | 走近一点；`calibrate --profile explore` 看 `target_visible` / `target_kind` / `target` 框；调 `chest_min_presence` / `chest_near_box_height`。 |
 | 卡在树/墙 | 连续两帧签名相似会触发 `S + Space + D`；仍卡就把 `stuck_limit` 调到 1，或降低 `stuck_similarity` 到 0.97。 |
 | 云电脑断连后脚本停了 | 这是 `cloud.pause_when_disconnected=true` 的保护；默认已关，确认套餐支持后台即可继续。 |
@@ -518,7 +490,7 @@ Jev 按图片 token 计费，实测一帧 1280×720 约 `$0.00006–0.00013`。
 ## 9. 代码结构
 
 ```
-fortnite_afk.py          CLI: run / demo / calibrate / doctor / keytest
+fortnite_afk.py          CLI: run / demo / calibrate / doctor（单一屏幕模式）
 FortniteAFK.exe          打包好的零依赖可执行文件
 run.ps1 / run.bat        自动读 key + 启动 exe
 config.json              你的配置（从 config.example.json 复制）
@@ -526,18 +498,20 @@ afk/
   config.py              配置、校验、key 解析
   capture.py             GDI 截图 + 纯 stdlib PNG
   png.py                 PNG 编码 / 画框
-  win32.py               窗口、DPI、SendInput / PostMessage、焦点
+  screen_target.py       屏幕矩形目标（不取任何窗口句柄）
+  win32.py               DPI + SendInput（唯一输入后端）
   jev.py                 System One 客户端（urllib，无 requests）
   screens.py             大厅/排队/局内/菜单/结算/探索 的 Jev 问题集
   controller.py          状态机：lobby -> queue -> match -> leave -> results
   explore.py             局内决策映射、开箱、翻越、卡住检测
   cloud.py               WTS 会话状态、黑屏检测、keep-awake
-  keytest.py             SendInput vs PostMessage 注入测试
+  motion.py              缓入缓出转向 + 镜头噪音
+  autotune.py            帧相关测灵敏度（诊断用，不参与运行）
   sim.py                 离线模拟器（demo/测试）
-tests/                   35 个 unittest
+tests/                   84 个 unittest
 tools/
   probe_jev.py           Jev API 冒烟测试（自带 mock 大厅图）
-  jev_walk_demo.py       Luanti 真实走路测试 + HTML 报告
+  screen_only_loop.py    无句柄运行器：整屏截图 + SendInput
 ```
 
 ---
@@ -564,4 +538,4 @@ python tools\probe_jev.py
 - **封号风险**：Epic 明确禁止自动化/挂机；本脚本不修改游戏文件、不读写内存，只模拟输入和看屏幕，但仍可能被行为检测/人工举报。别用主账号。
 - **云厂商风险**：海马等服务条款可能禁止脚本/挂机；可能封云账号。
 - **不是“全自动无脑稳”**：Jev 是小模型，复杂 UI/低置信度会拒绝点击；需要 calibrate 调阈值。
-- **Fortnite 未在本机安装**：所以“Fortnite 实机开箱/翻越/按钮”这条链路只完成了代码 + 模拟 + Luanti 视觉验证，最终要你在装有 Fortnite 的机器上跑 `doctor` / `keytest` / `calibrate` / `run --dry-run`。
+- **Fortnite 未在本机安装**：所以“Fortnite 实机开箱/翻越/按钮”这条链路只完成了代码 + 模拟 + Luanti 视觉验证，最终要你在装有 Fortnite 的机器上跑 `doctor` / `calibrate` / `run --dry-run`。

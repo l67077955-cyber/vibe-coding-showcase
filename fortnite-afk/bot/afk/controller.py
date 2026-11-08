@@ -15,8 +15,7 @@ from .explore import describe, frame_signature, plan_explore, signature_similari
 from .geometry import Box, Rect, box_center_screen
 from .jev import JevError, Observation
 from .motion import CameraNoise, aim_px, jitter, plan_turn, turn_duration
-from .win32 import InputController, focus_window, is_foreground, is_minimized, key_is_down
-from .win32 import client_rect as get_client_rect
+from .win32 import InputController, key_is_down
 from . import cloud
 
 log = logging.getLogger(__name__)
@@ -42,28 +41,6 @@ class RunSummary:
     cost: float
     started_at: float
     ended_at: float
-
-
-@dataclass
-class GameWindow:
-    cfg: Config
-
-    def find(self) -> int | None:
-        from .win32 import find_window
-
-        return find_window(self.cfg.window_class, self.cfg.window_title)
-
-    def is_foreground(self, hwnd: int) -> bool:
-        return is_foreground(hwnd)
-
-    def is_minimized(self, hwnd: int) -> bool:
-        return is_minimized(hwnd)
-
-    def focus(self, hwnd: int) -> bool:
-        return focus_window(hwnd)
-
-    def client_rect(self, hwnd: int) -> Rect:
-        return Rect(*get_client_rect(hwnd))
 
 
 class AfkController:
