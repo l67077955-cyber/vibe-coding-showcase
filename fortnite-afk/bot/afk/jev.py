@@ -10,6 +10,7 @@ import logging
 import random
 import socket
 import ssl
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -179,6 +180,11 @@ class _KeepAlive:
         # has to be rebuilt, which is still cheaper than a full handshake.
         self.ssl_context = ssl.create_default_context()
         self.conn: http.client.HTTPConnection | None = None
+        # One socket carries one request at a time. The session loop keeps
+        # several requests in flight and can also reuse a client from the main
+        # thread when a stale answer is discarded, so the socket is serialized
+        # here instead of relying on callers never overlapping.
+        self._lock = threading.RLock()
 
     def _connect(self) -> http.client.HTTPConnection:
         if self.scheme == "https":
@@ -198,14 +204,19 @@ class _KeepAlive:
         return http.client.HTTPConnection(self.host, self.port, timeout=self.timeout)
 
     def close(self) -> None:
-        if self.conn is not None:
-            try:
-                self.conn.close()
-            except Exception:  # noqa: BLE001 - closing must never raise
-                pass
-            self.conn = None
+        with self._lock:
+            if self.conn is not None:
+                try:
+                    self.conn.close()
+                except Exception:  # noqa: BLE001 - closing must never raise
+                    pass
+                self.conn = None
 
     def post(self, body: bytes, headers: dict[str, str]) -> tuple[int, str]:
+        with self._lock:
+            return self._post_locked(body, headers)
+
+    def _post_locked(self, body: bytes, headers: dict[str, str]) -> tuple[int, str]:
         last: Exception | None = None
         for _attempt in (1, 2):
             reused = self.conn is not None

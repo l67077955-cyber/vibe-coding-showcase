@@ -24,6 +24,7 @@ import json
 import random
 import sys
 import time
+from dataclasses import replace
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -38,6 +39,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from afk import cloud, screens  # noqa: E402
+from afk.calibration import clamp as clamp_scale  # noqa: E402
+from afk.calibration import load_scale, save_scale  # noqa: E402
 from afk.capture import ScreenCapture  # noqa: E402
 from afk.config import load_config  # noqa: E402
 from afk.explore import (describe, frame_signature, plan_explore,  # noqa: E402
@@ -45,7 +48,7 @@ from afk.explore import (describe, frame_signature, plan_explore,  # noqa: E402
 from afk.geometry import Rect, box_center_screen  # noqa: E402
 from afk.jev import JevClient, JevError, TransportError  # noqa: E402
 from afk.motion import CameraNoise, aim_px, aim_py, plan_turn  # noqa: E402
-from afk.screens import questions_for  # noqa: E402
+from afk.screens import menu_questions, questions_for  # noqa: E402
 from afk.uiagent import (DROP_QUESTIONS, SENSITIVITY_QUESTIONS,  # noqa: E402
                          UI_START_QUESTIONS)
 from afk.win32 import InputController, enable_dpi_awareness  # noqa: E402
@@ -89,19 +92,38 @@ class Session:
         self.cfg = load_config(ROOT / "config.json")
         self.rect = Rect(0, 0, user32.GetSystemMetrics(0), user32.GetSystemMetrics(1))
         self.capture = ScreenCapture(self.cfg.capture.max_width)
-        self.client = JevClient(self.cfg)
+        self.depth = max(1, int(getattr(args, "depth", 1)))
+        # One keep-alive connection per in-flight request: a socket can only
+        # carry one HTTP request at a time, so pipelining needs separate
+        # clients rather than one shared connection.
+        self.clients = [JevClient(self.cfg) for _ in range(self.depth)]
+        self.client = self.clients[0]
         self.inputs = InputController(dry_run=not args.act, key_mode=self.cfg.key_mode)
         self.noise = CameraNoise(random.Random(), self.cfg.turn)
         self.aim_gain = self.cfg.turn.gain
-        self.scale = float(self.cfg.turn.px_per_screen)
+        # Fixed sensitivity: the persisted number is used as-is for every turn.
+        # `--calibrate` re-enables the adaptive probe; by default the bot does
+        # not spend a model call re-measuring the camera mid-match.
+        default_scale = float(self.cfg.turn.px_per_screen)
+        if getattr(args, "scale", None):
+            self.scale = clamp_scale(args.scale)
+            save_scale(self.scale, source="cli")
+        else:
+            self.scale = load_scale(default_scale)
+        self.turn_cfg = replace(self.cfg.turn, px_per_screen=self.scale)
         self.held: set[str] = set()
         self.steps: list[dict] = []
         self.in_match_steps = 0
         self.last_sig: tuple[int, ...] = ()
         self.where = "lobby"
-        self.pool = ThreadPoolExecutor(max_workers=1)
-        self.prev = None
+        self.pool = ThreadPoolExecutor(max_workers=self.depth)
+        # (frame, future) pairs currently at the model, oldest first.
+        self.inflight: list[tuple[object, object, float, int | None]] = []
+        self.submitted = 0
+        self.last_submit_at: float | None = None
         self.no_move = 0
+        self.leave_attempts = 0
+        self.bus_steps = 0
         self.last_sim = None
 
     # ---------------------------------------------------------------- input
@@ -111,13 +133,13 @@ class Session:
         self.held.clear()
 
     def turn(self, dx: int, dy: int = 0) -> None:
-        sx = plan_turn(dx, self.cfg.turn) if dx else []
-        sy = plan_turn(dy, self.cfg.turn) if dy else []
+        sx = plan_turn(dx, self.turn_cfg) if dx else []
+        sy = plan_turn(dy, self.turn_cfg) if dy else []
         for i in range(max(len(sx), len(sy))):
-            nx, ny = self.noise.step(self.cfg.turn.tick_s)
+            nx, ny = self.noise.step(self.turn_cfg.tick_s)
             self.inputs.move_relative((sx[i] if i < len(sx) else 0) + nx,
                                       (sy[i] if i < len(sy) else 0) + ny)
-            time.sleep(self.cfg.turn.tick_s)
+            time.sleep(self.turn_cfg.tick_s)
 
     def click_box(self, box) -> tuple[int, int]:
         x, y = box_center_screen(box, self.rect)
@@ -131,10 +153,52 @@ class Session:
         return obs.screen, obs.screen_confidence, obs
 
     # ------------------------------------------------------------- in match
-    def ask_match(self, frame):
-        """Fire the gameplay question for `frame` (can run on a worker thread)."""
+    def ask_match(self, client, frame):
+        """Fire the gameplay question for `frame` (runs on a worker thread)."""
         self.in_match_steps += 1
-        return self.client.ask(frame, questions_for(self.cfg.explore.question_profile))
+        return client.ask(frame, questions_for(self.cfg.explore.question_profile))
+
+    def submit_match(self, frame):
+        """Queue one gameplay question on a free client/connection."""
+        client = self.clients[self.submitted % len(self.clients)]
+        now = time.monotonic()
+        gap = None if self.last_submit_at is None else round(
+            (now - self.last_submit_at) * 1000)
+        self.last_submit_at = now
+        self.submitted += 1
+        return self.pool.submit(self.ask_match, client, frame), now, gap
+
+    def pump_match(self, frame) -> dict:
+        """Keep `depth` gameplay questions in flight, apply the oldest answer.
+
+        One request takes seconds, so waiting for it before looking at the next
+        frame caps the bot at one decision per round trip. With two requests in
+        flight a fresh decision lands every latency/2, and each plan is based on
+        a frame from about one round trip ago - the same staleness as before,
+        but there is always another answer already on the way.
+        """
+        if not self.submitted:
+            # Cold start: a second identical request would just return the same
+            # answer, so the pipeline warms up with one call.
+            self.inflight.append((frame, *self.submit_match(frame)))
+        else:
+            while len(self.inflight) < self.depth:
+                shot = self.capture.grab(self.rect)
+                self.inflight.append((shot, *self.submit_match(shot)))
+
+        shot, future, sent_at, gap = self.inflight.pop(0)
+        obs = future.result()
+        plan, conf = self.plan_from(obs, shot)
+        record = self.execute_plan(plan, shot)
+        record.update({"action_conf": round(conf, 3),
+                       "screen": obs.screen,
+                       "screen_conf": round(obs.screen_confidence, 3),
+                       "api_age_ms": round((time.monotonic() - sent_at) * 1000),
+                       "http_ms": round(float(obs.timings.get("http_ms", 0))),
+                       "req_gap_ms": gap})
+        if self.args.calibrate and self.in_match_steps % self.args.probe_every == 0:
+            self.probe_sensitivity()
+        return record
 
     def plan_from(self, obs, frame):
         plan = plan_explore(obs, self.cfg, random.Random(), chest_ready=True)
@@ -148,10 +212,22 @@ class Session:
         self.last_sig = frame_signature(frame)
         self.last_sim = sim
 
+        # Start the legs before the camera: holding W/D first and turning
+        # second means the character walks a curve. Turning first and moving
+        # after looks like a turret rotating in place, and wastes the whole
+        # turn as dead time.
+        if plan.keys and plan.continuous:
+            new = {k.lower() for k in plan.keys}
+            for key in self.held - new:
+                self.inputs.key_up(key)
+            for key in new - self.held:
+                self.inputs.key_down(key)
+            self.held = new
+
         if plan.aim_norm or plan.aim_norm_y:
-            dx = aim_px(0.5 + plan.aim_norm, frame.width, self.cfg.turn,
+            dx = aim_px(0.5 + plan.aim_norm, frame.width, self.turn_cfg,
                         gain=self.aim_gain) if plan.aim_norm else 0
-            dy = aim_py(0.5 + plan.aim_norm_y, frame.height, self.cfg.turn,
+            dy = aim_py(0.5 + plan.aim_norm_y, frame.height, self.turn_cfg,
                         gain=self.aim_gain) if plan.aim_norm_y else 0
             self.turn(dx, dy)
         if plan.interact:
@@ -184,7 +260,80 @@ class Session:
                 "keys": sorted(self.held), "similarity": sim,
                 "merged": plan.merged, "reason": plan.reason}
 
+    def refocus(self) -> bool:
+        """Bring the game back without touching a single window handle.
+
+        Alt+Tab is the one window switcher that runs on SendInput alone: no
+        enumeration, no process handle, nothing to open. The bot taps it and
+        asks the judge whether the picture now shows the game; anything that is
+        not the game means another tap. If the game already had focus (the
+        character was just stuck), the first tap moves away, the judge says so,
+        and the next tap comes straight back.
+        """
+        self.release()
+        baseline = frame_signature(self.capture.grab(self.rect))
+        for attempt in range(1, 5):
+            self.inputs.key_down("alt")
+            self.inputs.press("tab", 0.05)
+            self.inputs.key_up("alt")
+            time.sleep(0.8)
+            probe = self.capture.grab(self.rect)
+            sig = frame_signature(probe)
+            if signature_similarity(baseline, sig) >= 0.98:
+                continue  # the switch did not happen; keep cycling
+            baseline = sig
+            try:
+                where, conf, _ = self.judge(probe)
+            except (JevError, TransportError) as exc:
+                print(f"        refocus: judge failed ({exc})")
+                return False
+            if where not in ("other", "loading"):
+                print(f"        refocus: back on the game ({where} {conf:.2f}) "
+                      f"after {attempt} Alt+Tab")
+                return True
+        print("        refocus: could not reach the game with Alt+Tab")
+        return False
+
     # ------------------------------------------------------------ out match
+    def step_leave(self, frame) -> dict:
+        """Eliminated / results: get out through the pause menu.
+
+        The generic UI question set has no "leave match" action, so this uses
+        the menu set: confirm an open dialog first, then Leave Match, then the
+        results screen's Return to Lobby. Esc opens the pause menu when the
+        death screen has no clickable button yet.
+        """
+        obs = self.client.ask(frame, menu_questions(),
+                              context="We are out of the match and want the lobby.")
+        # Stay in this layer for the next few steps even if the judge sees the
+        # pause menu as "other": it belongs to leaving, not to the lobby flow.
+        self.leave_attempts = 3
+        screen, _ = obs.choice("screen")
+        for action, name in (("confirm", "confirm_button"),
+                             ("leave", "leave_button"),
+                             ("return", "return_lobby_button")):
+            box = obs.usable_box(name, min_confidence=0.30, min_presence=0.45,
+                                 allow_null=False, max_side=0.95)
+            if box is not None:
+                x, y = self.click_box(box)
+                time.sleep(1.2)
+                return {"layer": "leave", "screen": screen, "action": action,
+                        "note": f"clicked {action} at ({x},{y})"}
+        before = self.capture.grab(self.rect)
+        self.inputs.press("esc", 0.10)
+        time.sleep(1.0)
+        after = self.capture.grab(self.rect)
+        if signature_similarity(frame_signature(before),
+                                frame_signature(after)) >= 0.99:
+            # Esc changed nothing at all. Either the death screen ignores it or
+            # the key never reached the game; Alt+Tab tells the two apart.
+            print("        Esc had no visible effect; checking focus")
+            if self.refocus():
+                return {"layer": "leave", "screen": screen, "action": "refocus",
+                        "note": "Esc did nothing; refocused the game"}
+        return {"layer": "leave", "screen": screen, "action": "esc",
+                "note": "no button: pressed Esc to open the pause menu"}
+
     def step_drop(self, frame) -> dict:
         """Bus / free-fall / glider handling - the part that was missing.
 
@@ -220,9 +369,14 @@ class Session:
                               context="We want the next match. Pick the one button.")
         screen, _ = obs.choice("screen")
         action, action_conf = obs.choice("target_action")
-        box = obs.usable_box("target_button", min_confidence=0.25,
-                             min_presence=0.40, allow_null=True,
-                             null_value=0.5, max_side=0.95)
+        # Only trust a box when the model actually named an action. Answering
+        # "none" still produces a box sometimes, and clicking those is how the
+        # bot used to end up poking empty corners of the death screen.
+        box = None
+        if action not in (None, "none", "wait") and action_conf >= 0.20:
+            box = obs.usable_box("target_button", min_confidence=0.25,
+                                 min_presence=0.40, allow_null=False,
+                                 max_side=0.95)
         note = "no box"
         if box is not None:
             x, y = self.click_box(box)
@@ -259,8 +413,14 @@ class Session:
             return
         shift, conf = obs.choice("view_shift")
         factor = {"none": 1.8, "small": 1.35, "good": 1.0, "large": 0.6}.get(shift, 1.0)
-        self.scale = max(0.25, min(8.0, self.scale * factor))
-        print(f"    sensitivity: view={shift}({conf:.2f}) -> px_per_screen {self.scale:.2f}")
+        self.scale = clamp_scale(self.scale * factor)
+        self.turn_cfg = replace(self.turn_cfg, px_per_screen=self.scale)
+        # Persist immediately: the next launch (and the next match) starts from
+        # this number even if this process is killed mid-session.
+        saved = save_scale(self.scale, view_shift=shift, confidence=conf,
+                           source="session_loop")
+        print(f"    sensitivity: view={shift}({conf:.2f}) -> px_per_screen "
+              f"{self.scale:.2f} (saved, {saved['probes']} probes)")
         self.steps.append({"layer": "sensitivity", "view_shift": shift,
                            "confidence": round(conf, 3), "scale": round(self.scale, 2)})
 
@@ -270,8 +430,19 @@ class Session:
             ROOT / "logs" / "session" / datetime.now().strftime("%Y%m%d_%H%M%S"))
         out_dir.mkdir(parents=True, exist_ok=True)
         print(f"session -> {out_dir}")
-        print("click the game now; starting in 6 seconds")
+        print(f"sensitivity: {self.scale:.2f} px/screen (fixed"
+              f"{', calibrating' if self.args.calibrate else ''})")
+        print(f"pipeline depth: {self.depth} "
+              f"({'one decision per round trip' if self.depth == 1 else 'overlapping requests'})")
+        print("click the game now; starting in 6 seconds "
+              "(if it is still in the background I will try Alt+Tab)")
         time.sleep(6)
+        try:
+            start_where, _, _ = self.judge(self.capture.grab(self.rect))
+            if start_where in ("other", "loading"):
+                self.refocus()
+        except (JevError, TransportError) as exc:
+            print(f"startup focus check failed: {exc}")
 
         try:
             for cycle in range(1, self.args.cycles + 1):
@@ -283,38 +454,40 @@ class Session:
                     time.sleep(2.0)
                     continue
                 try:
-                    obs = None
                     if self.where == "in_match":
-                        # Pipeline: send the next question now, then spend the
-                        # wait executing the previous plan. The character keeps
-                        # moving while the model is thinking instead of after.
-                        future = self.pool.submit(self.ask_match, frame)
-                        if self.prev is not None:
-                            prev_plan, prev_conf, prev_frame = self.prev
-                            self.execute_plan(prev_plan, prev_frame)
-                        obs = future.result()
-                        plan, conf = self.plan_from(obs, frame)
-                        self.prev = (plan, conf, frame)
-                        where = obs.screen
-                        record = {"layer": "match", "plan": describe(plan),
-                                  "action_conf": round(conf, 3),
-                                  "keys": sorted(self.held),
-                                  "merged": plan.merged, "reason": plan.reason}
-                        if self.in_match_steps % self.args.probe_every == 0:
-                            self.probe_sensitivity()
+                        record = self.pump_match(frame)
+                        where = record.get("screen") or "in_match"
+                        # The in-match question set answers "other" whenever the
+                        # frame does not look like any listed state - a vehicle
+                        # close-up, a half-covered screen, a wall. That is still
+                        # the match: only death / results / menu end it.
+                        if where in ("other", "loading"):
+                            where = "in_match"
+                        conf = float(record.get("screen_conf") or 0.0)
                     else:
+                        self.inflight.clear()
                         # Precise state layer: one call that names the exact
                         # screen, including bus / skydive / glide, which a
                         # generic "loading" bucket used to swallow.
                         where, conf, job = self.judge(frame)
+                        if where == "lobby":
+                            self.leave_attempts = 0
                         if where == "bus":
+                            self.bus_steps += 1
                             drop_now = job.noul("drop_now") or 0.0
-                            if drop_now >= 0.40:
+                            # The model reads drop_now around 0.25-0.35 for most
+                            # of the ride, so a 0.40 gate never fired and the bot
+                            # rode to the end. Jump at 0.25, and force it after
+                            # eight decisions so one low reading cannot trap it.
+                            if drop_now >= 0.25 or self.bus_steps >= 8:
                                 self.inputs.press("space", 0.08)
-                                note = f"jumped off the bus (drop_now {drop_now:.2f})"
+                                note = (f"jumped off the bus (drop_now {drop_now:.2f}, "
+                                        f"step {self.bus_steps})")
                             else:
-                                note = f"waiting on the bus (drop_now {drop_now:.2f})"
-                            record = {"layer": "drop", "note": note}
+                                note = (f"waiting on the bus (drop_now {drop_now:.2f}, "
+                                        f"step {self.bus_steps})")
+                            record = {"layer": "drop", "drop_now": round(drop_now, 2),
+                                      "note": note}
                         elif where in ("skydive", "glide"):
                             if not self.held:
                                 self.inputs.key_down("w")
@@ -324,8 +497,15 @@ class Session:
                         elif where in ("queue", "loading"):
                             record = {"layer": "wait", "note": where}
                             time.sleep(1.0)
+                        elif where in ("eliminated", "results"):
+                            record = self.step_leave(frame)
+                        elif where == "other" and self.leave_attempts > 0:
+                            self.leave_attempts -= 1
+                            record = self.step_leave(frame)
                         else:
                             record = self.step_ui(frame)
+                        if where != "bus":
+                            self.bus_steps = 0
                 except (JevError, TransportError) as exc:
                     print(f"[{cycle:03d}] error: {exc}")
                     time.sleep(1.5)
@@ -343,12 +523,16 @@ class Session:
                     self.no_move = 0
                 if self.no_move >= 3:
                     # Typing into whatever else is focused is worse than doing
-                    # nothing: release everything and wait until the picture
-                    # changes (i.e. the person went back to the game).
+                    # nothing: release everything, try to get the game back,
+                    # and only then resume.
                     print("        input paused: keys are held but the frame is frozen.")
+                    self.no_move = 0
+                    if self.refocus():
+                        self.inflight.clear()
+                        continue
                     print("        click the game window to resume; nothing is being sent.")
                     self.release()
-                    self.prev = None
+                    self.inflight.clear()
                     baseline = frame_signature(frame)
                     for _ in range(30):
                         time.sleep(1.0)
@@ -356,7 +540,6 @@ class Session:
                         if signature_similarity(baseline, frame_signature(probe)) < 0.98:
                             print("        screen changed again; resuming")
                             break
-                    self.no_move = 0
                     continue
                 record.update({"cycle": cycle, "judge": where,
                                "judge_conf": round(conf, 3)})
@@ -368,7 +551,9 @@ class Session:
             print("stopped")
         finally:
             self.release()
-            self.client.close()
+            self.pool.shutdown(wait=False, cancel_futures=True)
+            for client in self.clients:
+                client.close()
             self.capture.close()
             (out_dir / "session.json").write_text(
                 json.dumps({"steps": self.steps, "scale": self.scale},
@@ -383,8 +568,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--cycles", type=int, default=200)
     p.add_argument("--act", action="store_true", help="send input (default: observe)")
     p.add_argument("--probe-every", type=int, default=10,
-                   help="in-match steps between sensitivity probes")
+                   help="in-match steps between sensitivity probes (needs --calibrate)")
+    p.add_argument("--calibrate", action="store_true",
+                   help="re-enable the adaptive sensitivity probe (default: fixed scale)")
+    p.add_argument("--depth", type=int, default=2,
+                   help="gameplay requests kept in flight; 1 = wait for each answer")
     p.add_argument("--out", default="")
+    p.add_argument("--scale", type=float, default=None,
+                   help="override and persist px_per_screen (mouse px per screen width)")
     args = p.parse_args(argv)
     enable_dpi_awareness()
     cloud.keep_awake(True)
