@@ -9,7 +9,7 @@ out instead of grinding against geometry.
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .config import Config
 from .jev import Observation
@@ -50,6 +50,87 @@ MOVEMENT_ACTIONS = {"move_forward", "move_forward_left", "move_forward_right",
                     "strafe_left", "strafe_right", "back_up"}
 
 
+def _top_actions(obs: Observation, k: int = 3, min_prob: float = 0.15) -> list[tuple[str, float]]:
+    """The model's top-k actions with their probabilities.
+
+    System One returns the full distribution, so the second and third choices
+    are free information. Discarding them forces the bot to pick one verb per
+    decision even when "walk forward" and "strafe left" are both likely and
+    perfectly compatible.
+    """
+    answer = obs.answers.get("action") or {}
+    probabilities = answer.get("probabilities") or {}
+    pairs = [(name, float(prob)) for name, prob in probabilities.items()
+             if name in ACTION_KEYS and float(prob) >= min_prob]
+    pairs.sort(key=lambda item: -item[1])
+    if not pairs:
+        choice, confidence = obs.choice("action")
+        if choice:
+            pairs = [(choice, confidence)]
+    return pairs[:k]
+
+
+MOVEMENT_VECTORS = {
+    "move_forward": (1, 0), "move_forward_left": (1, -1),
+    "move_forward_right": (1, 1), "strafe_left": (0, -1),
+    "strafe_right": (0, 1), "back_up": (-1, 0),
+}
+
+
+def _movement_conflicts(a: str, b: str) -> bool:
+    """Two movement actions conflict when they point opposite ways.
+
+    Forward + strafe is perpendicular and compatible; forward + backward
+    cancels out and must not be merged into W+S.
+    """
+    va, vb = MOVEMENT_VECTORS.get(a), MOVEMENT_VECTORS.get(b)
+    if not va or not vb:
+        return False
+    return va[0] * vb[0] + va[1] * vb[1] < 0
+
+
+def _merge_actions(plan: ExplorePlan, obs: Observation) -> ExplorePlan:
+    """Fold compatible runner-up actions into the chosen plan.
+
+    Compatible: movement + movement (W and A), movement + fire/aim, movement +
+    look. Conflicting: forward vs back, left vs right (they cancel), two
+    different verbs (interact vs jump vs reload), opposite looks. Conflicting
+    extras are simply dropped, never averaged.
+    """
+    pairs = _top_actions(obs, k=3, min_prob=0.18)
+    if len(pairs) < 2:
+        return plan
+    base = plan.action
+    keys = {key.lower() for key in plan.keys}
+    mouse = plan.mouse
+    added: list[str] = []
+    for name, prob in pairs[1:]:
+        if name == base or prob < 0.18:
+            continue
+        # Movement can join movement, attack, aim or a look.
+        if name in MOVEMENT_ACTIONS:
+            if _movement_conflicts(base, name):
+                continue
+            if base in MOVEMENT_ACTIONS or base in ("attack", "aim"):
+                keys |= {key.lower() for key in ACTION_KEYS[name]}
+                added.append(name)
+        elif name == "attack" and base in MOVEMENT_ACTIONS and not mouse:
+            mouse = "left"
+            added.append(name)
+        elif name == "aim" and base in MOVEMENT_ACTIONS and not mouse:
+            mouse = "right"
+            added.append(name)
+        # Everything else (verbs, opposite directions) stays out: the top
+        # action already won those conflicts.
+    if not added:
+        return plan
+    plan.keys = sorted(keys)
+    plan.mouse = mouse
+    plan.reason = f"{plan.reason} + {'/'.join(added)}"
+    plan.merged = added
+    return plan
+
+
 @dataclass
 class ExplorePlan:
     keys: list[str]
@@ -76,6 +157,9 @@ class ExplorePlan:
     # crosshair, so the camera should tilt down. Without this the bot only ever
     # turned left/right.
     aim_norm_y: float = 0.0
+    # Runner-up actions folded into this plan because they did not conflict
+    # (e.g. move_forward + strafe_left -> W+A).
+    merged: list[str] = field(default_factory=list)
 
 
 def frame_signature(frame) -> tuple[int, ...]:
@@ -302,7 +386,7 @@ def _plan_action(obs: Observation, cfg: Config, rng: random.Random, *,
     jump = action in ("jump_forward", "jump_in_place")
     interact = action == "interact"
 
-    return ExplorePlan(
+    plan = ExplorePlan(
         keys=keys, hold_s=hold, jump=jump, interact=interact, look_dx=look_dx,
         reason=reason, move=action, move_confidence=action_conf,
         chest_presence=target_visible, chest_distance=target_distance or "unclear",
@@ -312,6 +396,7 @@ def _plan_action(obs: Observation, cfg: Config, rng: random.Random, *,
         aim_norm=aim_norm,
         aim_norm_y=aim_norm_y,
     )
+    return _merge_actions(plan, obs)
 
 
 def describe(plan: ExplorePlan) -> str:

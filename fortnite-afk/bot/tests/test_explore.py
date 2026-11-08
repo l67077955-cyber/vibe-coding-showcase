@@ -27,6 +27,36 @@ class ExplorePlanTests(unittest.TestCase):
         self.cfg = Config()
         self.rng = random.Random(1)
 
+    def test_compatible_runner_up_actions_merge(self):
+        obs = observation(
+            action={"type": "choice", "choice": "move_forward", "confidence": 0.45,
+                    "probabilities": {"move_forward": 0.45, "strafe_left": 0.30,
+                                      "attack": 0.20}},
+            hold={"type": "choice", "choice": "short", "confidence": 0.7,
+                  "probabilities": {}},
+            path={"type": "choice", "choice": "clear", "confidence": 0.9,
+                  "probabilities": {}},
+        )
+        plan = plan_explore(obs, self.cfg, self.rng, chest_ready=True)
+        self.assertEqual(plan.action, "move_forward")
+        self.assertIn("w", plan.keys)
+        self.assertIn("a", plan.keys)
+        self.assertEqual(plan.mouse, "left")
+        self.assertIn("strafe_left", plan.merged)
+
+    def test_opposite_movement_is_not_merged(self):
+        obs = observation(
+            action={"type": "choice", "choice": "move_forward", "confidence": 0.40,
+                    "probabilities": {"move_forward": 0.40, "back_up": 0.35}},
+            hold={"type": "choice", "choice": "short", "confidence": 0.7,
+                  "probabilities": {}},
+            path={"type": "choice", "choice": "clear", "confidence": 0.9,
+                  "probabilities": {}},
+        )
+        plan = plan_explore(obs, self.cfg, self.rng, chest_ready=True)
+        self.assertEqual(plan.keys, ["w"])
+        self.assertEqual(plan.merged, [])
+
     def test_enemy_visible_triggers_attack(self):
         obs = observation(
             action={"type": "choice", "choice": "move_forward", "confidence": 0.8,
