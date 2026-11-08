@@ -1,0 +1,1804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>FORWEB chest | far</title>
+<style>
+  /* ------------------------------------------------------------------
+     Base layout - one canvas, a few HTML overlays for crisp HUD text.
+     System fonts only, no external assets, works from file://
+  ------------------------------------------------------------------ */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: #05070a;
+    font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+    cursor: crosshair;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  #view {
+    position: fixed; inset: 0;
+    width: 100%; height: 100%;
+    display: block;
+  }
+
+  /* colour grade + vignette so it reads as a game, not a diagram */
+  #grade {
+    position: fixed; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(115% 90% at 50% 42%, rgba(255, 240, 200, 0) 38%, rgba(20, 12, 0, .18) 74%, rgba(8, 5, 0, .48) 100%),
+      linear-gradient(180deg, rgba(30, 90, 140, .10) 0%, rgba(255, 190, 90, .06) 55%, rgba(0, 0, 0, .22) 100%);
+    mix-blend-mode: normal;
+  }
+
+  #scan {
+    position: fixed; inset: 0; pointer-events: none; opacity: .16;
+    background: repeating-linear-gradient(180deg, rgba(255,255,255,.05) 0 1px, rgba(0,0,0,0) 1px 3px);
+  }
+
+  #hud { position: fixed; inset: 0; pointer-events: none; }
+
+  /* ---------------- top-left chest readout ---------------- */
+  #readout {
+    position: absolute; left: 26px; top: 22px;
+    padding: 10px 18px 12px 16px;
+    background: linear-gradient(180deg, rgba(12, 14, 20, .66), rgba(8, 9, 13, .42));
+    border: 1px solid rgba(255, 210, 110, .35);
+    border-left: 3px solid #ffc84a;
+    border-radius: 4px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .35);
+    backdrop-filter: blur(2px);
+  }
+  #readout .lbl {
+    font-size: 12px; letter-spacing: 3px; font-weight: 700;
+    color: #ffcf63; text-shadow: 0 1px 2px #000;
+  }
+  #readout .dist {
+    margin-top: 2px;
+    font-size: 30px; font-weight: 700; line-height: 1;
+    color: #f6f9ff; text-shadow: 0 2px 6px rgba(0, 0, 0, .8);
+    font-variant-numeric: tabular-nums;
+  }
+  #readout .dist .unit {
+    font-size: 16px; font-weight: 600; color: #a9b6c7; margin-left: 3px;
+  }
+  #readout.range { border-left-color: #6bff9a; }
+  #readout.range .lbl { color: #8dffb0; }
+
+  /* ---------------- crosshair ---------------- */
+  #crosshair {
+    position: absolute; left: 50%; top: 50%;
+    width: 22px; height: 22px; margin: -11px 0 0 -11px;
+  }
+  #crosshair i {
+    position: absolute; background: rgba(255, 255, 255, .92);
+    box-shadow: 0 0 3px rgba(0, 0, 0, .9);
+    border-radius: 1px;
+  }
+  #crosshair i:nth-child(1) { left: 10px; top: 0; width: 2px; height: 6px; }
+  #crosshair i:nth-child(2) { left: 10px; bottom: 0; width: 2px; height: 6px; }
+  #crosshair i:nth-child(3) { top: 10px; left: 0; width: 6px; height: 2px; }
+  #crosshair i:nth-child(4) { top: 10px; right: 0; width: 6px; height: 2px; }
+  #crosshair i:nth-child(5) { left: 10px; top: 10px; width: 2px; height: 2px; background: #ffe08a; }
+
+  /* ---------------- top-right control hint ---------------- */
+  #help {
+    position: absolute; right: 24px; top: 24px;
+    padding: 8px 14px;
+    font-size: 15px; letter-spacing: .6px;
+    color: rgba(233, 241, 252, .78);
+    background: rgba(8, 10, 15, .45);
+    border: 1px solid rgba(255, 255, 255, .10);
+    border-radius: 4px;
+    text-shadow: 0 1px 2px #000;
+  }
+  #help b { color: #ffd877; font-weight: 700; }
+
+  /* ---------------- bottom-centre interact prompt ---------------- */
+  #prompt {
+    position: absolute; left: 50%; bottom: 62px;
+    transform: translate(-50%, 14px);
+    display: flex; align-items: center; gap: 14px;
+    padding: 13px 26px 15px 16px;
+    font-size: 22px; font-weight: 700; letter-spacing: 2.4px;
+    color: #f4f7fb; text-shadow: 0 2px 8px rgba(0, 0, 0, .9);
+    background: linear-gradient(180deg, rgba(14, 16, 22, .82), rgba(6, 7, 10, .72));
+    border: 1px solid rgba(255, 210, 110, .45);
+    border-radius: 6px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .5), inset 0 0 24px rgba(255, 190, 70, .12);
+    opacity: 0; pointer-events: none;
+    transition: opacity .13s ease, transform .13s ease;
+    white-space: nowrap;
+  }
+  #prompt.show { opacity: 1; transform: translate(-50%, 0); }
+  #prompt kbd {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 42px; height: 42px; padding: 0 8px;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-size: 24px; font-weight: 800; color: #2a1b04;
+    background: linear-gradient(180deg, #ffe9a0, #f3b632 62%, #d4901a);
+    border: 2px solid #fff2c0;
+    border-radius: 6px;
+    box-shadow: 0 3px 0 #7d5506, 0 6px 14px rgba(0, 0, 0, .45);
+    text-shadow: 0 1px 0 rgba(255, 255, 255, .5);
+  }
+
+  /* ---------------- opened banner ---------------- */
+  #banner {
+    position: absolute; left: 50%; top: 11%;
+    transform: translate(-50%, -26px) scale(.82);
+    font-size: 76px; font-weight: 800; letter-spacing: 8px;
+    color: #ffe9a8;
+    background: linear-gradient(180deg, #fff6d4 6%, #ffd25e 42%, #e39a12 100%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 3px 0 #6b3d00) drop-shadow(0 10px 26px rgba(0, 0, 0, .75));
+    opacity: 0; pointer-events: none;
+    transition: opacity .3s ease, transform .5s cubic-bezier(.16, 1.5, .4, 1);
+    white-space: nowrap;
+  }
+  #banner.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
+
+  /* ---------------- loot card ---------------- */
+  #loot {
+    position: absolute; right: 44px; bottom: 96px;
+    width: 300px; padding: 16px 20px 18px;
+    transform: translateX(60px); opacity: 0;
+    background: linear-gradient(150deg, rgba(38, 26, 8, .95), rgba(14, 11, 6, .95));
+    border: 2px solid #e8a92a;
+    border-radius: 8px;
+    box-shadow: 0 0 24px rgba(255, 178, 44, .45), 0 14px 34px rgba(0, 0, 0, .65), inset 0 0 28px rgba(255, 174, 40, .18);
+    transition: opacity .35s ease, transform .45s cubic-bezier(.16, 1.4, .4, 1);
+  }
+  #loot.show { opacity: 1; transform: translateX(0); }
+  #loot .rarity {
+    font-size: 12px; letter-spacing: 4px; font-weight: 800; color: #ffd66b;
+    text-shadow: 0 0 10px rgba(255, 190, 60, .7);
+  }
+  #loot .item {
+    margin-top: 5px;
+    font-size: 23px; font-weight: 800; letter-spacing: .6px; color: #fff4d2;
+    text-shadow: 0 2px 6px #000;
+  }
+  #loot .sub {
+    margin-top: 5px;
+    font-size: 13px; letter-spacing: .4px; color: rgba(255, 230, 180, .68);
+  }
+  #loot .bar {
+    margin-top: 12px; height: 4px; border-radius: 2px;
+    background: linear-gradient(90deg, #ffcf5c, #ff8b1f 60%, #b45a00);
+  }
+
+  /* hidden machine-readable state for --dump-dom checks */
+  #state {
+    position: fixed; left: 0; top: 0;
+    font-size: 1px; line-height: 1; opacity: .001;
+    color: transparent; pointer-events: none;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+
+<style>
+  /* Showcase chrome: a single unobtrusive link back to the write-up. */
+  #aboutlink {
+    position: fixed; right: 14px; bottom: 14px; z-index: 60;
+    font: 600 12px/1 "Segoe UI", "Microsoft YaHei", sans-serif;
+    letter-spacing: .06em; text-transform: uppercase;
+    color: #f4e6c4; background: rgba(12, 16, 24, .78);
+    border: 1px solid rgba(232, 193, 112, .55); border-radius: 999px;
+    padding: 9px 14px; text-decoration: none; backdrop-filter: blur(6px);
+    transition: background .15s ease, border-color .15s ease;
+  }
+  #aboutlink:hover { background: rgba(232, 193, 112, .18); border-color: #e8c170; }
+</style>
+<a id="aboutlink" href="about.html">About this build &rarr;</a>
+
+<canvas id="view"></canvas>
+
+<div id="grade"></div>
+<div id="scan"></div>
+
+<div id="hud">
+  <div id="readout">
+    <div class="lbl">CHEST</div>
+    <div class="dist"><span id="distval">4.0</span><span class="unit">m</span></div>
+  </div>
+
+  <div id="crosshair"><i></i><i></i><i></i><i></i><i></i></div>
+
+  <div id="help"><b>WASD</b> move &nbsp;&middot;&nbsp; <b>E</b> open</div>
+
+  <div id="prompt"><kbd>E</kbd><span>PRESS&nbsp;&nbsp;E&nbsp;&nbsp;TO OPEN CHEST</span></div>
+
+  <div id="banner">CHEST OPENED</div>
+
+  <div id="loot">
+    <div class="rarity">LEGENDARY</div>
+    <div class="item">PUMP SHOTGUN</div>
+    <div class="sub">Golden Chest &middot; Power 132</div>
+    <div class="bar"></div>
+  </div>
+</div>
+
+<div id="state">boot</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ==================================================================
+     1. CONFIG - the harness contract lives here
+     ================================================================== */
+  const Q = new URLSearchParams(location.search);
+  const SCENE = (Q.get('scene') || 'fortnite').toLowerCase() === 'dungeon' ? 'dungeon' : 'fortnite';
+  const AUTO = Q.get('auto') === '1';
+
+  const INTERACT_RANGE = 2.4;   // exact contract value
+  const CHEST_PUSH = 1.9;       // soft collider radius around the chest
+  const EYE = 0.5;              // eye height, walls are 1.0 tall
+  const WALL_H = 1.0;
+  const PLANE_LEN = 0.72;       // camera plane length -> ~71 deg horizontal FOV
+  const WALK_SPEED = 1.18;      // units/sec (4.0 -> 2.4 in ~1.4s)
+  const RUN_SPEED = 2.18;
+  const TURN_SPEED = 2.05;      // rad/sec on arrow keys
+  const PLAYER_R = 0.24;
+  const CHEST_H = 1.15;         // world height of the chest sprite (canvas height)
+  const MW = 20, MH = 20;       // world grid size in cells
+  const TAU = Math.PI * 2;
+
+  /* ==================================================================
+     2. WORLD DATA
+     ================================================================== */
+  const SCENES = {
+    fortnite: {
+      spawn: { x: 9.5, z: 8.0, angle: Math.PI / 2 },
+      chest: { x: 9.5, z: 12.0 },
+      fog: [214, 238, 246],
+      fogDensity: 0.085,
+      fogStart: 3.0,
+      ground: 'grass'
+    },
+    dungeon: {
+      spawn: { x: 9.5, z: 8.0, angle: Math.PI / 2 },
+      chest: { x: 9.5, z: 11.6 },
+      fog: [8, 8, 12],
+      fogDensity: 0.165,
+      fogStart: 0.0,
+      ground: 'stone'
+    }
+  };
+
+  // Fortnite field: hedge border, red barn on the left, wooden pallets right.
+  function buildFortnite() {
+    const g = [];
+    for (let z = 0; z < MH; z++) g.push(new Array(MW).fill(0));
+    for (let x = 0; x < MW; x++) { g[0][x] = 1; g[MH - 1][x] = 1; }
+    for (let z = 0; z < MH; z++) { g[z][0] = 1; g[z][MW - 1] = 1; }
+    for (let z = 9; z <= 13; z++) { g[z][4] = 2; g[z][5] = 2; }   // barn wall
+    g[14][15] = 3; g[14][16] = 3; g[15][15] = 3;                  // pallets
+    g[17][6] = 3;
+    return g;
+  }
+
+  // Dungeon: central corridor, a wide transept, a side chamber.
+  function buildDungeon() {
+    const g = [];
+    for (let z = 0; z < MH; z++) g.push(new Array(MW).fill(1));
+    for (let z = 5; z <= 18; z++) for (let x = 8; x <= 11; x++) g[z][x] = 0;
+    for (let z = 11; z <= 12; z++) for (let x = 2; x <= 17; x++) g[z][x] = 0;
+    for (let z = 6; z <= 9; z++) for (let x = 12; x <= 15; x++) g[z][x] = 0;
+    for (let z = 15; z <= 18; z++) for (let x = 5; x <= 14; x++) g[z][x] = 0;
+    return g;
+  }
+
+  const MAP = SCENE === 'dungeon' ? buildDungeon() : buildFortnite();
+  const CFG = SCENES[SCENE];
+  const SPAWN = CFG.spawn;
+  const CHEST_X = CFG.chest.x;
+  const CHEST_Z = CFG.chest.z;
+
+  const TORCHES = SCENE === 'dungeon' ? [
+    { x: 8.05, z: 6.6, s: 1.0 },
+    { x: 11.95, z: 9.4, s: 1.0 },
+    { x: 8.05, z: 13.6, s: 1.0 },
+    { x: 11.95, z: 14.8, s: 0.9 },
+    { x: 17.90, z: 11.5, s: 1.0 },
+    { x: 4.10, z: 12.6, s: 0.9 }
+  ] : [];
+
+  const TREE_SPOTS = [
+    { x: 5.4, z: 15.4, v: 0, s: 1.00 },
+    { x: 16.4, z: 13.0, v: 1, s: 1.15 },
+    { x: 3.5, z: 6.4, v: 2, s: 1.30 },
+    { x: 17.6, z: 6.6, v: 0, s: 0.92 },
+    { x: 13.8, z: 17.2, v: 1, s: 1.20 },
+    { x: 5.2, z: 18.0, v: 2, s: 0.95 },
+    { x: 2.6, z: 12.0, v: 1, s: 1.05 }
+  ];
+
+  /* ==================================================================
+     3. DOM / CANVAS
+     ================================================================== */
+  const view = document.getElementById('view');
+  const ctx = view.getContext('2d', { alpha: false });
+  const stateEl = document.getElementById('state');
+  const distEl = document.getElementById('distval');
+  const promptEl = document.getElementById('prompt');
+  const bannerEl = document.getElementById('banner');
+  const lootEl = document.getElementById('loot');
+  const readoutEl = document.getElementById('readout');
+
+  // half-resolution buffer for floor + ceiling casting (cheap, upscaled)
+  const floorCanvas = document.createElement('canvas');
+  const floorCtx = floorCanvas.getContext('2d', { alpha: true });
+  let floorImg = null;
+
+  // chest art is repainted every frame into this canvas
+  const chestCanvas = document.createElement('canvas');
+  chestCanvas.width = 320; chestCanvas.height = 340;
+
+  let W = 1280, H = 800, FOCAL = 889;
+  let zbuf = new Float32Array(W);
+
+  /* ==================================================================
+     4. LIVE STATE
+     ================================================================== */
+  let px = SPAWN.x, pz = SPAWN.z, angle = SPAWN.angle;
+  let pitchPx = 0, bobY = 0, bobT = 0, jumpY = 0, jumpV = 0, jumpQueued = false;
+  let distance = 0, inRange = false, opened = false, openness = 0;
+  let steps = 0, timeNow = 0, autoAssist = false;
+  let dirX = 0, dirZ = 1, planeX = -PLANE_LEN, planeZ = 0, horizon = 400;
+  let lightFlicker = 1;
+  let openedAt = -1;
+
+  const keys = Object.create(null);
+  const particles = [];
+  const MOVE_KEYS = new Set(['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' ']);
+
+  /* ==================================================================
+     5. LIGHT GRID (dungeon only - gentle torch pools without per-pixel loops)
+     ================================================================== */
+  const LIGHT_RES = 4;
+  let lightGrid = null;
+
+  function buildLightGrid() {
+    const gw = MW * LIGHT_RES + 1, gh = MH * LIGHT_RES + 1;
+    const arr = new Float32Array(gw * gh);
+    for (let j = 0; j < gh; j++) {
+      for (let i = 0; i < gw; i++) {
+        const wx = i / LIGHT_RES, wz = j / LIGHT_RES;
+        let L = 0.10;
+        for (let k = 0; k < TORCHES.length; k++) {
+          const t = TORCHES[k];
+          const dx = wx - t.x, dz = wz - t.z;
+          const d2 = dx * dx + dz * dz;
+          if (d2 < 16) {
+            const f = 1 - Math.sqrt(d2) / 4;
+            L += f * f * 1.55 * (t.s || 1);
+          }
+        }
+        arr[j * gw + i] = Math.min(1.7, L);
+      }
+    }
+    lightGrid = { arr: arr, gw: gw, gh: gh };
+  }
+
+  function sampleLight(x, z) {
+    if (!lightGrid) return 0.4;
+    const gx = x * LIGHT_RES, gz = z * LIGHT_RES;
+    let i = gx | 0, j = gz | 0;
+    if (i < 0) i = 0; else if (i > lightGrid.gw - 2) i = lightGrid.gw - 2;
+    if (j < 0) j = 0; else if (j > lightGrid.gh - 2) j = lightGrid.gh - 2;
+    const fx = gx - i, fz = gz - j;
+    const gw = lightGrid.gw, a = lightGrid.arr;
+    const v00 = a[j * gw + i], v10 = a[j * gw + i + 1];
+    const v01 = a[(j + 1) * gw + i], v11 = a[(j + 1) * gw + i + 1];
+    return (v00 * (1 - fx) + v10 * fx) * (1 - fz) + (v01 * (1 - fx) + v11 * fx) * fz;
+  }
+
+  /* ==================================================================
+     6. SPRITE ART (all procedural, cached where possible)
+     ================================================================== */
+  function roundedRect(g, x, y, w, h, r) {
+    const rr = Math.min(r, w / 2, h / 2);
+    g.beginPath();
+    g.moveTo(x + rr, y);
+    g.lineTo(x + w - rr, y);
+    g.arcTo(x + w, y, x + w, y + rr, rr);
+    g.lineTo(x + w, y + h - rr);
+    g.arcTo(x + w, y + h, x + w - rr, y + h, rr);
+    g.lineTo(x + rr, y + h);
+    g.arcTo(x, y + h, x, y + h - rr, rr);
+    g.lineTo(x, y + rr);
+    g.arcTo(x, y, x + rr, y, rr);
+    g.closePath();
+  }
+
+  // ---- cartoon tree -------------------------------------------------
+  function makeTree(variant) {
+    const c = document.createElement('canvas');
+    c.width = 260; c.height = 360;
+    const g = c.getContext('2d');
+    const BASE = 352;
+    const greens = [['#57ad3e', '#2f7c28'], ['#4aa24a', '#276b34'], ['#7cbc3c', '#3d8423']][variant % 3];
+
+    g.globalAlpha = 0.28;
+    g.fillStyle = '#12380f';
+    g.beginPath(); g.ellipse(130, BASE - 4, 66, 15, 0, 0, TAU); g.fill();
+    g.globalAlpha = 1;
+
+    // trunk
+    g.beginPath();
+    g.moveTo(114, BASE); g.lineTo(112, 176); g.lineTo(148, 176); g.lineTo(146, BASE);
+    g.closePath();
+    g.fillStyle = '#7a5027'; g.fill();
+    g.lineWidth = 8; g.strokeStyle = '#1d1206'; g.stroke();
+    g.strokeStyle = 'rgba(60,32,10,.55)'; g.lineWidth = 3;
+    g.beginPath(); g.moveTo(124, 190); g.lineTo(123, BASE - 6); g.stroke();
+    g.beginPath(); g.moveTo(137, 200); g.lineTo(137, BASE - 28); g.stroke();
+
+    // canopy: outline pass then fill pass so overlaps stay readable
+    const blobs = [
+      [130, 118, 84], [74, 156, 60], [186, 156, 60],
+      [130, 52, 58], [92, 92, 56], [170, 92, 56]
+    ];
+    g.lineWidth = 12; g.strokeStyle = '#173f12';
+    for (let i = 0; i < blobs.length; i++) {
+      const b = blobs[i];
+      g.beginPath(); g.arc(b[0], b[1], b[2], 0, TAU); g.stroke();
+    }
+    g.fillStyle = greens[0];
+    for (let i = 0; i < blobs.length; i++) {
+      const b = blobs[i];
+      g.beginPath(); g.arc(b[0], b[1], b[2], 0, TAU); g.fill();
+    }
+    // shaded lower-right lobes
+    g.fillStyle = greens[1];
+    for (let i = 0; i < blobs.length; i++) {
+      const b = blobs[i];
+      g.beginPath();
+      g.arc(b[0] + b[2] * 0.22, b[1] + b[2] * 0.34, b[2] * 0.55, 0, TAU);
+      g.fill();
+    }
+    // highlights
+    g.fillStyle = 'rgba(220,255,170,.30)';
+    for (let i = 0; i < 7; i++) {
+      const b = blobs[i % blobs.length];
+      g.beginPath();
+      g.arc(b[0] - b[2] * 0.3 + (i % 3) * 9, b[1] - b[2] * 0.3, 10 + (i % 4) * 3, 0, TAU);
+      g.fill();
+    }
+    return c;
+  }
+
+  const TREES = SCENE === 'dungeon' ? [] : TREE_SPOTS.map(function (t) { return { art: makeTree(t.v), x: t.x, z: t.z, s: t.s }; });
+
+  // ---- dungeon torch -------------------------------------------------
+  function makeTorch(flameVariant) {
+    const c = document.createElement('canvas');
+    c.width = 96; c.height = 170;
+    const g = c.getContext('2d');
+
+    // bracket
+    g.fillStyle = '#241d17';
+    g.strokeStyle = '#0b0908';
+    g.lineWidth = 5;
+    roundedRect(g, 40, 70, 16, 92, 5);
+    g.fill(); g.stroke();
+    roundedRect(g, 24, 64, 48, 14, 5);
+    g.fillStyle = '#3a2f24'; g.fill(); g.stroke();
+
+    // glow halo
+    const gl = g.createRadialGradient(48, 44, 2, 48, 44, 48);
+    gl.addColorStop(0, 'rgba(255,190,90,.55)');
+    gl.addColorStop(1, 'rgba(255,120,20,0)');
+    g.fillStyle = gl;
+    g.beginPath(); g.arc(48, 44, 48, 0, TAU); g.fill();
+
+    // flame
+    const wob = [0, 4, -3][flameVariant % 3];
+    g.beginPath();
+    g.moveTo(48 + wob, 6);
+    g.quadraticCurveTo(74, 40, 62, 62);
+    g.quadraticCurveTo(56, 72, 48, 74);
+    g.quadraticCurveTo(38, 72, 34, 60);
+    g.quadraticCurveTo(24, 38, 48 + wob, 6);
+    g.closePath();
+    const fg = g.createLinearGradient(0, 6, 0, 76);
+    fg.addColorStop(0, '#fff3b0');
+    fg.addColorStop(0.45, '#ffb02e');
+    fg.addColorStop(1, '#e2560f');
+    g.fillStyle = fg; g.fill();
+    g.lineWidth = 4; g.strokeStyle = 'rgba(90,30,0,.55)'; g.stroke();
+
+    g.beginPath();
+    g.ellipse(48, 58, 9, 16, 0, 0, TAU);
+    g.fillStyle = 'rgba(255,245,190,.92)'; g.fill();
+    return c;
+  }
+
+  const TORCH_ART = [makeTorch(0), makeTorch(1), makeTorch(2)];
+
+  /* ---------------- the chest ---------------- */
+  function paintChest(t) {
+    const c = chestCanvas;
+    const g = c.getContext('2d');
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, c.width, c.height);
+
+    const CX = 160, BASE = 330;
+    const BW = 232, BH = 108;
+    const BX = CX - BW / 2, BY = BASE - BH;
+    const out = '#1e1206';
+
+    // contact shadow
+    g.globalAlpha = 0.36;
+    g.fillStyle = '#160c02';
+    g.beginPath(); g.ellipse(CX, BASE - 2, BW * 0.56, 16, 0, 0, TAU); g.fill();
+    g.globalAlpha = 1;
+
+    // gold gradient shared by rim / straps / lid
+    const gold = g.createLinearGradient(0, BY - 4, 0, BY + 16);
+    gold.addColorStop(0, '#fff0b3');
+    gold.addColorStop(0.5, '#f7bd3c');
+    gold.addColorStop(1, '#c98a12');
+
+    const LW = BW, LH = 78;
+    const cavH = 30 + 10 * t;      // height of the visible dark cavity
+
+    // ---- open lid (stands behind the body, hinge at the cavity edge) ----
+    if (t > 0.04) {
+      const h = LH * 0.74;
+      g.save();
+      g.translate(CX, BY - cavH + 8);
+      g.scale(0.90, 1);
+      g.beginPath();
+      g.moveTo(-LW / 2, 0);
+      g.lineTo(-LW / 2 + 8, -h + 22);
+      g.quadraticCurveTo(-LW / 2 + 10, -h, -LW / 2 + 36, -h);
+      g.lineTo(LW / 2 - 36, -h);
+      g.quadraticCurveTo(LW / 2 - 10, -h, LW / 2 - 8, -h + 22);
+      g.lineTo(LW / 2, 0);
+      g.closePath();
+      const lg = g.createLinearGradient(0, -h, 0, 0);
+      lg.addColorStop(0, '#3a1c06');
+      lg.addColorStop(0.45, '#57300f');
+      lg.addColorStop(1, '#7b4519');
+      g.fillStyle = lg;
+      g.fill();
+      g.lineWidth = 8;
+      g.strokeStyle = out;
+      g.stroke();
+      // inner planks
+      g.save();
+      g.clip();
+      g.strokeStyle = 'rgba(20,10,2,.55)';
+      g.lineWidth = 3;
+      for (let i = 1; i < 6; i++) {
+        const x = -LW / 2 + LW * i / 6;
+        g.beginPath(); g.moveTo(x, 0); g.lineTo(x, -h); g.stroke();
+      }
+      // gold trim along the inner rim
+      g.fillStyle = gold;
+      g.fillRect(-LW / 2, -h, LW, 13);
+      g.restore();
+      g.lineWidth = 5;
+      g.strokeStyle = out;
+      g.beginPath();
+      g.moveTo(-LW / 2 + 6, -h + 13);
+      g.lineTo(LW / 2 - 6, -h + 13);
+      g.stroke();
+      g.restore();
+    }
+
+    // ---- interior: dark cavity, glow and a little loot ----
+    if (t > 0.02) {
+      const cavTop = BY - cavH;
+      g.fillStyle = '#150a02';
+      roundedRect(g, BX + 8, cavTop, BW - 16, cavH + 26, 10);
+      g.fill();
+      const ig = g.createRadialGradient(CX, cavTop + cavH * 0.55, 3, CX, cavTop + cavH * 0.55, BW * 0.58);
+      ig.addColorStop(0, 'rgba(255,238,170,' + (0.60 * t).toFixed(3) + ')');
+      ig.addColorStop(0.35, 'rgba(255,176,44,' + (0.34 * t).toFixed(3) + ')');
+      ig.addColorStop(1, 'rgba(120,54,4,0)');
+      g.fillStyle = ig;
+      roundedRect(g, BX + 8, cavTop, BW - 16, cavH + 26, 10);
+      g.fill();
+      // coins peeking out of the cavity
+      if (t > 0.45) {
+        g.fillStyle = '#ffd257';
+        g.strokeStyle = '#8a5a06';
+        g.lineWidth = 2;
+        const coins = [[-58, 6, 9], [-30, 0, 10], [-2, 7, 8], [28, 1, 10], [56, 6, 8]];
+        for (let i = 0; i < coins.length; i++) {
+          const cx2 = CX + coins[i][0], cy2 = BY - 10 + coins[i][1];
+          g.beginPath(); g.ellipse(cx2, cy2, coins[i][2], coins[i][2] * 0.72, 0, 0, TAU);
+          g.fill(); g.stroke();
+        }
+      }
+    }
+
+    // ---- body ----
+    const wood = g.createLinearGradient(0, BY, 0, BASE);
+    wood.addColorStop(0, '#a2622b');
+    wood.addColorStop(0.42, '#824a1e');
+    wood.addColorStop(1, '#5b2f10');
+    roundedRect(g, BX, BY, BW, BH, 12);
+    g.fillStyle = wood; g.fill();
+    g.lineWidth = 9; g.strokeStyle = out; g.stroke();
+
+    // planks + grain
+    g.save();
+    roundedRect(g, BX, BY, BW, BH, 12); g.clip();
+    g.strokeStyle = 'rgba(30,16,4,.55)'; g.lineWidth = 3;
+    for (let i = 1; i < 7; i++) {
+      const x = BX + BW * i / 7;
+      g.beginPath(); g.moveTo(x, BY); g.lineTo(x, BY + BH); g.stroke();
+    }
+    g.strokeStyle = 'rgba(255,206,140,.10)'; g.lineWidth = 2;
+    for (let i = 0; i < 6; i++) {
+      const y = BY + 14 + i * 16;
+      g.beginPath(); g.moveTo(BX + 4, y); g.lineTo(BX + BW - 4, y + 5); g.stroke();
+    }
+    // face shadow at the bottom
+    const fs = g.createLinearGradient(0, BY + BH * 0.55, 0, BASE);
+    fs.addColorStop(0, 'rgba(0,0,0,0)');
+    fs.addColorStop(1, 'rgba(0,0,0,.32)');
+    g.fillStyle = fs; g.fillRect(BX, BY, BW, BH);
+    g.restore();
+
+    // top rim
+    roundedRect(g, BX - 3, BY - 1, BW + 6, 16, 6);
+    g.fillStyle = gold; g.fill();
+    g.lineWidth = 5; g.strokeStyle = out; g.stroke();
+
+    // vertical gold straps
+    const strap = g.createLinearGradient(0, BY, 0, BASE);
+    strap.addColorStop(0, '#ffe89a');
+    strap.addColorStop(0.45, '#f2b431');
+    strap.addColorStop(1, '#b97c0c');
+    const strapXs = [BX + 16, BX + BW - 46];
+    for (let i = 0; i < strapXs.length; i++) {
+      roundedRect(g, strapXs[i], BY - 2, 30, BH + 4, 6);
+      g.fillStyle = strap; g.fill();
+      g.lineWidth = 5; g.strokeStyle = out; g.stroke();
+      // rivets
+      g.fillStyle = 'rgba(80,48,6,.85)';
+      g.beginPath(); g.arc(strapXs[i] + 15, BY + 16, 3.2, 0, TAU); g.fill();
+      g.beginPath(); g.arc(strapXs[i] + 15, BASE - 14, 3.2, 0, TAU); g.fill();
+    }
+
+    // corner feet
+    g.fillStyle = '#2a1a08';
+    roundedRect(g, BX + 8, BASE - 8, 26, 12, 4); g.fill();
+    roundedRect(g, BX + BW - 34, BASE - 8, 26, 12, 4); g.fill();
+
+    // ---- closed lid (sits on top of the body) ----
+    if (t <= 0.04) {
+      g.save();
+      g.translate(CX, BY + 6);
+      const lg = g.createLinearGradient(0, -LH, 0, 0);
+      lg.addColorStop(0, '#b06a2e');
+      lg.addColorStop(1, '#7c451b');
+      g.beginPath();
+      g.moveTo(-LW / 2, 0);
+      g.lineTo(-LW / 2, -LH + 24);
+      g.quadraticCurveTo(-LW / 2, -LH, -LW / 2 + 26, -LH);
+      g.lineTo(LW / 2 - 26, -LH);
+      g.quadraticCurveTo(LW / 2, -LH, LW / 2, -LH + 24);
+      g.lineTo(LW / 2, 0);
+      g.closePath();
+      g.fillStyle = lg; g.fill();
+      g.lineWidth = 9; g.strokeStyle = out; g.stroke();
+
+      // lid planks
+      g.save();
+      g.clip();
+      g.strokeStyle = 'rgba(30,16,4,.5)';
+      g.lineWidth = 3;
+      for (let i = 1; i < 7; i++) {
+        const x = -LW / 2 + LW * i / 7;
+        g.beginPath(); g.moveTo(x, 0); g.lineTo(x, -LH); g.stroke();
+      }
+      g.restore();
+
+      // lid straps
+      const lidStrap = g.createLinearGradient(0, -LH, 0, 0);
+      lidStrap.addColorStop(0, '#ffe89a');
+      lidStrap.addColorStop(1, '#c4870f');
+      for (let i = 0; i < 2; i++) {
+        const x = (i === 0 ? -LW / 2 + 16 : LW / 2 - 46);
+        g.beginPath();
+        g.rect(x, -LH - 2, 30, LH + 2);
+        g.fillStyle = lidStrap; g.fill();
+        g.lineWidth = 5; g.strokeStyle = out; g.stroke();
+      }
+
+      // lid lip
+      roundedRect(g, -LW / 2 - 2, -8, LW + 4, 13, 5);
+      g.fillStyle = gold; g.fill();
+      g.lineWidth = 5; g.strokeStyle = out; g.stroke();
+      g.restore();
+    }
+
+    // ---- lock plate ----
+    const lock = g.createLinearGradient(0, BY - 16, 0, BY + 48);
+    lock.addColorStop(0, '#fff0b3');
+    lock.addColorStop(0.5, '#f6bb3a');
+    lock.addColorStop(1, '#b87a0c');
+    roundedRect(g, CX - 33, BY - 14, 66, 62, 8);
+    g.fillStyle = lock; g.fill();
+    g.lineWidth = 6; g.strokeStyle = out; g.stroke();
+    // keyhole
+    g.fillStyle = '#2b1a05';
+    g.beginPath(); g.arc(CX, BY + 12, 9, 0, TAU); g.fill();
+    g.beginPath();
+    g.moveTo(CX - 5, BY + 14); g.lineTo(CX + 5, BY + 14);
+    g.lineTo(CX + 8, BY + 38); g.lineTo(CX - 8, BY + 38);
+    g.closePath(); g.fill();
+    // plate highlight
+    g.strokeStyle = 'rgba(255,255,220,.65)'; g.lineWidth = 2.4;
+    g.beginPath(); g.moveTo(CX - 25, BY - 8); g.lineTo(CX + 24, BY - 8); g.stroke();
+  }
+
+  /* ==================================================================
+     7. CAMERA / PROJECTION
+     ================================================================== */
+  function camera() {
+    dirX = Math.cos(angle);
+    dirZ = Math.sin(angle);
+    planeX = -dirZ * PLANE_LEN;
+    planeZ = dirX * PLANE_LEN;
+    horizon = H * 0.5 + pitchPx - bobY - jumpY * FOCAL * 0.55;
+  }
+
+  function projectX(wx, wz, out) {
+    const relX = wx - px, relZ = wz - pz;
+    const invDet = 1 / (planeX * dirZ - dirX * planeZ);
+    const tx = invDet * (dirZ * relX - dirX * relZ);
+    out.ty = invDet * (-planeZ * relX + planeX * relZ);
+    out.sx = (W / 2) * (1 + tx / out.ty);
+    return out;
+  }
+
+  /* ==================================================================
+     8. SKY (fortnite)
+     ================================================================== */
+  const CLOUDS = [];
+  (function seedClouds() {
+    const rnd = mulberry32(7);
+    for (let i = 0; i < 22; i++) {
+      CLOUDS.push({
+        az: -Math.PI + i * (TAU / 22) + (rnd() - 0.5) * 0.22,
+        el: 60 + rnd() * 165,
+        s: 70 + rnd() * 110,
+        a: 0.55 + rnd() * 0.35
+      });
+    }
+  })();
+
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function normAngle(a) {
+    while (a > Math.PI) a -= TAU;
+    while (a < -Math.PI) a += TAU;
+    return a;
+  }
+
+  const SUN_AZ = 1.15;
+
+  function drawSky() {
+    const hz = Math.max(40, horizon);
+    const sky = ctx.createLinearGradient(0, 0, 0, hz);
+    sky.addColorStop(0, '#2f9fe0');
+    sky.addColorStop(0.42, '#77c9f2');
+    sky.addColorStop(0.78, '#c8ebfa');
+    sky.addColorStop(1, '#eaf8ff');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, hz + 2);
+
+    // sun haze
+    const sa = normAngle(SUN_AZ - angle);
+    if (Math.abs(sa) < 1.35) {
+      const sx = W / 2 + Math.tan(sa) * FOCAL;
+      const sy = hz - 190;
+      const sg = ctx.createRadialGradient(sx, sy, 10, sx, sy, 260);
+      sg.addColorStop(0, 'rgba(255,250,220,.85)');
+      sg.addColorStop(0.25, 'rgba(255,240,180,.45)');
+      sg.addColorStop(1, 'rgba(255,230,150,0)');
+      ctx.fillStyle = sg;
+      ctx.fillRect(sx - 260, sy - 260, 520, 520);
+      ctx.fillStyle = 'rgba(255,253,238,.95)';
+      ctx.beginPath(); ctx.arc(sx, sy, 34, 0, TAU); ctx.fill();
+    }
+
+    // clouds with world-angle parallax
+    ctx.save();
+    for (let i = 0; i < CLOUDS.length; i++) {
+      const c = CLOUDS[i];
+      const d = normAngle(c.az - angle);
+      if (Math.abs(d) > 1.2) continue;
+      const cx = W / 2 + Math.tan(d) * FOCAL;
+      const cy = Math.min(hz - 30, hz - c.el);
+      drawCloud(cx, cy, c.s, c.a);
+    }
+    ctx.restore();
+
+    // two hill layers hugging the horizon
+    const layers = [
+      { base: 54, amp: 26, f: 2.1, f2: 4.9, ph: 0.7, col: '#9fd0bd', blur: 0.55 },
+      { base: 30, amp: 20, f: 3.3, f2: 7.1, ph: 2.2, col: '#63b077', blur: 1 }
+    ];
+    for (let l = 0; l < layers.length; l++) {
+      const L = layers[l];
+      ctx.beginPath();
+      ctx.moveTo(-4, hz + 30);
+      for (let x = -4; x <= W + 4; x += 12) {
+        const cam = (x / W * 2 - 1) * PLANE_LEN;
+        const a = angle + Math.atan(cam);
+        const hgt = L.base + L.amp * Math.sin(a * L.f + L.ph) + L.amp * 0.45 * Math.sin(a * L.f2 + L.ph * 2);
+        ctx.lineTo(x, hz - Math.max(2, hgt));
+      }
+      ctx.lineTo(W + 4, hz + 30);
+      ctx.closePath();
+      ctx.globalAlpha = L.blur;
+      ctx.fillStyle = L.col;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    // haze at the base of the hills
+    const haze = ctx.createLinearGradient(0, hz - 24, 0, hz + 4);
+    haze.addColorStop(0, 'rgba(226,246,255,0)');
+    haze.addColorStop(1, 'rgba(232,248,255,.85)');
+    ctx.fillStyle = haze;
+    ctx.fillRect(0, hz - 24, W, 28);
+  }
+
+  function drawCloud(cx, cy, s, a) {
+    ctx.globalAlpha = a;
+    ctx.fillStyle = '#ffffff';
+    const puffs = [
+      [0, 0, 1.0], [-0.85, 0.18, 0.66], [0.8, 0.2, 0.72], [-0.4, -0.3, 0.62], [0.35, -0.28, 0.55]
+    ];
+    for (let i = 0; i < puffs.length; i++) {
+      const p = puffs[i];
+      ctx.beginPath();
+      ctx.ellipse(cx + p[0] * s, cy + p[1] * s * 0.5, s * p[2], s * p[2] * 0.55, 0, 0, TAU);
+      ctx.fill();
+    }
+    ctx.globalAlpha = a * 0.35;
+    ctx.fillStyle = '#bfe2f5';
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + s * 0.24, s * 1.15, s * 0.24, 0, 0, TAU);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  /* ==================================================================
+     9. FLOOR + CEILING CAST
+     ================================================================== */
+  function castFloor() {
+    const fw = floorCanvas.width, fh = floorCanvas.height;
+    const img = floorImg;
+    const data = img.data;
+    const isSky = SCENE === 'fortnite';
+    const rayX0 = dirX - planeX, rayX1 = dirX + planeX;
+    const rayZ0 = dirZ - planeZ, rayZ1 = dirZ + planeZ;
+    const dRx = (rayX1 - rayX0) / fw;
+    const dRz = (rayZ1 - rayZ0) / fw;
+    const fogR = CFG.fog[0], fogG = CFG.fog[1], fogB = CFG.fog[2];
+    const fogD = CFG.fogDensity, fogS = CFG.fogStart;
+    const stone = CFG.ground === 'stone';
+    const flick = lightFlicker;
+    let idx = 0;
+
+    for (let yy = 0; yy < fh; yy++) {
+      const sy = yy * 2 + 1;
+      const isFloorRow = sy > horizon;
+
+      if (isSky && !isFloorRow) {
+        for (let xx = 0; xx < fw; xx++) { data[idx + 3] = 0; idx += 4; }
+        continue;
+      }
+
+      const dy = isFloorRow ? (sy - horizon) : (horizon - sy);
+      const rowDist = ((isFloorRow ? EYE : (WALL_H - EYE)) * FOCAL) / Math.max(1.2, dy);
+      let wx = px + rowDist * rayX0;
+      let wz = pz + rowDist * rayZ0;
+      const stepX = rowDist * dRx, stepZ = rowDist * dRz;
+
+      const fog = 1 - Math.exp(-Math.max(0, rowDist - fogS) * fogD);
+
+      if (stone) {
+        // ---------- dungeon: cool stone with torch pools ----------
+        for (let xx = 0; xx < fw; xx++) {
+          const cell = (Math.floor(wx) + Math.floor(wz)) & 1;
+          const n = h2(Math.floor(wx * 3), Math.floor(wz * 3));
+          let r, g, b;
+          const base = 38 + cell * 9 + n * 9;
+          if (isFloorRow) {
+            r = base + 4; g = base + 2; b = base - 1;
+          } else {
+            r = base * 0.50; g = base * 0.52; b = base * 0.60;
+          }
+          const L = sampleLight(wx, wz) * flick;
+          const lit = 0.20 + L * 1.30;
+          r = r * lit + L * 62;
+          g = g * lit + L * 40;
+          b = b * lit + L * 15;
+          // fake torch pools on the floor
+          if (isFloorRow) {
+            r += L * 20; g += L * 8;
+          }
+          data[idx] = r + (fogR - r) * fog;
+          data[idx + 1] = g + (fogG - g) * fog;
+          data[idx + 2] = b + (fogB - b) * fog;
+          data[idx + 3] = 255;
+          idx += 4;
+          wx += stepX; wz += stepZ;
+        }
+      } else {
+        // ---------- fortnite: saturated cartoon grass ----------
+        for (let xx = 0; xx < fw; xx++) {
+          const chk = (Math.floor(wx * 2) + Math.floor(wz * 2)) & 1;
+          const n = h2(Math.floor(wx * 5), Math.floor(wz * 5));
+          const n2 = h2(Math.floor(wx * 1.4) + 31, Math.floor(wz * 1.4) + 17);
+          let r = 86 + chk * 9 + n * 14 + n2 * 10;
+          let g = 154 + chk * 12 + n * 20 + n2 * 14;
+          let b = 62 + chk * 5 + n * 10;
+          data[idx] = r + (fogR - r) * fog;
+          data[idx + 1] = g + (fogG - g) * fog;
+          data[idx + 2] = b + (fogB - b) * fog;
+          data[idx + 3] = 255;
+          idx += 4;
+          wx += stepX; wz += stepZ;
+        }
+      }
+    }
+    floorCtx.putImageData(img, 0, 0);
+    ctx.drawImage(floorCanvas, 0, 0, W, H);
+  }
+
+  // fast integer hash -> [0,1)
+  function h2(x, y) {
+    let n = (x * 374761393 + y * 668265263) | 0;
+    n = (n ^ (n >> 13)) * 1274126177 | 0;
+    return ((n ^ (n >> 16)) >>> 0) / 4294967296;
+  }
+
+  /* ==================================================================
+     10. WALLS (DDA raycast)
+     ================================================================== */
+  function wallColor(mat, side, wallX, mx, mz, hitX, hitZ) {
+    let r, g, b;
+    if (SCENE === 'dungeon') {
+      const j = h2(mx, mz) * 10;
+      r = 82 + j; g = 80 + j; b = 80 + j;
+    } else if (mat === 2) {
+      r = 182; g = 58; b = 46;                    // barn red
+      const plank = Math.abs(Math.sin(wallX * Math.PI * 6));
+      r *= 0.84 + 0.16 * plank; g *= 0.84 + 0.16 * plank; b *= 0.84 + 0.16 * plank;
+    } else if (mat === 3) {
+      r = 168; g = 122; b = 66;                   // pallets
+      const plank = Math.abs(Math.sin(wallX * Math.PI * 5 + 1.1));
+      r *= 0.8 + 0.2 * plank; g *= 0.8 + 0.2 * plank; b *= 0.8 + 0.2 * plank;
+    } else {
+      r = 62; g = 126; b = 58;                    // hedge
+      const bush = Math.sin(wallX * 47.0 + mx * 3.3) * Math.sin(wallX * 19.0 + mz * 2.1);
+      r += bush * 16; g += bush * 22; b += bush * 10;
+    }
+
+    if (side === 1) { r *= 0.78; g *= 0.78; b *= 0.78; }
+
+    if (SCENE === 'dungeon') {
+      const L = sampleLight(hitX, hitZ) * lightFlicker;
+      const lit = 0.20 + L * 1.35;
+      r = r * lit + L * 58;
+      g = g * lit + L * 34;
+      b = b * lit + L * 12;
+    } else {
+      // soft vertical variation so flat walls do not look like plastic
+      const v = 0.94 + 0.06 * Math.sin(wallX * Math.PI * 2);
+      r *= v; g *= v; b *= v;
+    }
+    return [r, g, b];
+  }
+
+  // per-material wall height: the field fence is low so the hills stay visible
+  function matHeight(mat) {
+    if (SCENE === 'dungeon') return 1.0;
+    if (mat === 2) return 1.0;   // barn
+    if (mat === 3) return 0.58;  // pallets
+    return 0.68;                 // hedge / fence
+  }
+
+  function castWalls() {
+    zbuf.fill(Infinity);
+    const stepPx = 2;
+    const fogR = CFG.fog[0], fogG = CFG.fog[1], fogB = CFG.fog[2];
+    const fogD = CFG.fogDensity, fogS = CFG.fogStart;
+
+    for (let x = 0; x < W; x += stepPx) {
+      const camX = 2 * x / W - 1;
+      const rayX = dirX + planeX * camX;
+      const rayZ = dirZ + planeZ * camX;
+
+      let mapX = Math.floor(px), mapZ = Math.floor(pz);
+      const deltaX = Math.abs(1 / (rayX || 1e-9));
+      const deltaZ = Math.abs(1 / (rayZ || 1e-9));
+      const stepX = rayX < 0 ? -1 : 1;
+      const stepZ = rayZ < 0 ? -1 : 1;
+      let sideDistX = rayX < 0 ? (px - mapX) * deltaX : (mapX + 1 - px) * deltaX;
+      let sideDistZ = rayZ < 0 ? (pz - mapZ) * deltaZ : (mapZ + 1 - pz) * deltaZ;
+
+      let side = 0, hit = 0, guard = 0;
+      while (!hit && guard++ < 96) {
+        if (sideDistX < sideDistZ) {
+          sideDistX += deltaX; mapX += stepX; side = 0;
+        } else {
+          sideDistZ += deltaZ; mapZ += stepZ; side = 1;
+        }
+        if (mapX < 0 || mapX >= MW || mapZ < 0 || mapZ >= MH) { hit = 1; break; }
+        if (MAP[mapZ][mapX] > 0) hit = 1;
+      }
+
+      const perp = Math.max(0.06, side === 0 ? (sideDistX - deltaX) : (sideDistZ - deltaZ));
+      let wallX = side === 0 ? (pz + perp * rayZ) : (px + perp * rayX);
+      wallX -= Math.floor(wallX);
+
+      const mat = (mapX >= 0 && mapX < MW && mapZ >= 0 && mapZ < MH) ? MAP[mapZ][mapX] : 1;
+      const wh = matHeight(mat);
+
+      const lineH = FOCAL * wh / perp;
+      const yBottom = horizon + EYE * FOCAL / perp;
+      const yTop = yBottom - lineH;
+
+      const hitX = px + perp * rayX;
+      const hitZ = pz + perp * rayZ;
+      const col = wallColor(mat, side, wallX, mapX, mapZ, hitX, hitZ);
+      const fog = 1 - Math.exp(-Math.max(0, perp - fogS) * fogD);
+      const r = col[0] + (fogR - col[0]) * fog;
+      const g = col[1] + (fogG - col[1]) * fog;
+      const b = col[2] + (fogB - col[2]) * fog;
+
+      const yy = Math.floor(yTop);
+      const hh = Math.ceil(lineH) + 1;
+      ctx.fillStyle = 'rgb(' + (r | 0) + ',' + (g | 0) + ',' + (b | 0) + ')';
+      ctx.fillRect(x, yy, stepPx, hh);
+
+      // cheap texture: darker seam at the top, lighter kick at the base
+      if (lineH > 26) {
+        ctx.fillStyle = 'rgba(0,0,0,0.16)';
+        ctx.fillRect(x, yy, stepPx, 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.05)';
+        ctx.fillRect(x, yy + hh - 3, stepPx, 2);
+      }
+      // low fence: bright top rail so the silhouette reads
+      if (wh < 0.9 && lineH > 5) {
+        ctx.fillStyle = 'rgba(255,255,255,0.20)';
+        ctx.fillRect(x, yy, stepPx, Math.max(2, lineH * 0.07));
+      }
+
+      for (let z2 = x; z2 < x + stepPx && z2 < W; z2++) zbuf[z2] = perp;
+    }
+  }
+
+  /* ==================================================================
+     11. SPRITES
+     ================================================================== */
+  const projTmp = { sx: 0, ty: 1 };
+
+  function drawStrips(art, sx, sy, sw, sh, depth) {
+    const x0 = Math.max(0, Math.floor(sx));
+    const x1 = Math.min(W, Math.ceil(sx + sw));
+    if (x1 <= x0 || sh <= 0) return;
+    const aw = art.width, ah = art.height;
+    for (let x = x0; x < x1; x += 2) {
+      const bw = Math.min(2, x1 - x);
+      if (zbuf[x] < depth) continue;
+      const u0 = (x - sx) / sw;
+      const u1 = (x + bw - sx) / sw;
+      if (u1 <= 0 || u0 >= 1) continue;
+      const su = Math.max(0, u0) * aw;
+      const su2 = Math.min(1, u1) * aw;
+      if (su2 <= su) continue;
+      ctx.drawImage(art, su, 0, su2 - su, ah, x, sy, bw, sh);
+    }
+  }
+
+  function drawSprites() {
+    // build the draw list
+    const list = [];
+
+    // chest
+    projectX(CHEST_X, CHEST_Z, projTmp);
+    const chestDepth = projTmp.ty;
+    const chestSx = projTmp.sx;
+    if (chestDepth > 0.18) {
+      const sh = FOCAL * CHEST_H / chestDepth;
+      const sw = sh * (chestCanvas.width / chestCanvas.height);
+      list.push({
+        kind: 'chest', art: chestCanvas, depth: chestDepth,
+        sx: projTmp.sx - sw / 2, sy: horizon + EYE * FOCAL / chestDepth - sh * (326 / 340),
+        sw: sw, sh: sh
+      });
+    }
+
+    // trees
+    for (let i = 0; i < TREES.length; i++) {
+      const t = TREES[i];
+      projectX(t.x, t.z, projTmp);
+      if (projTmp.ty <= 0.2) continue;
+      const sh = FOCAL * 3.3 * t.s / projTmp.ty;
+      const sw = sh * (260 / 360);
+      list.push({
+        kind: 'tree', art: t.art, depth: projTmp.ty,
+        sx: projTmp.sx - sw / 2,
+        sy: horizon + EYE * FOCAL / projTmp.ty - sh * (352 / 360),
+        sw: sw, sh: sh
+      });
+    }
+
+    // torches
+    if (SCENE === 'dungeon') {
+      const flick = 0.85 + 0.15 * Math.sin(timeNow * 17.0) + 0.06 * Math.sin(timeNow * 31.0);
+      for (let i = 0; i < TORCHES.length; i++) {
+        const t = TORCHES[i];
+        projectX(t.x, t.z, projTmp);
+        if (projTmp.ty <= 0.2) continue;
+        const sh = FOCAL * 0.62 * (t.s || 1) / projTmp.ty;
+        const sw = sh * (96 / 170);
+        const art = TORCH_ART[Math.floor(timeNow * 9 + i) % 3];
+        list.push({
+          kind: 'torch', art: art, depth: projTmp.ty,
+          sx: projTmp.sx - sw / 2,
+          sy: horizon + EYE * FOCAL / projTmp.ty - sh * (150 / 170),
+          sw: sw, sh: sh, flick: flick
+        });
+      }
+    }
+
+    list.sort(function (a, b) { return b.depth - a.depth; });
+
+    // chest glow behind everything chest-ish
+    if (chestDepth > 0.2) {
+      const sh = FOCAL * CHEST_H / chestDepth;
+      const cx = chestSx;
+      if (cx > -200 && cx < W + 200) {
+        const gy = horizon + EYE * FOCAL / chestDepth - sh * 0.55;
+        const gr = Math.max(60, sh * 0.75);
+        const zcol = Math.floor(cx / 2);
+        if (zbuf[Math.max(0, Math.min(W - 1, zcol))] > chestDepth) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          const grd = ctx.createRadialGradient(cx, gy, 4, cx, gy, gr);
+          const glowA = opened ? 0.15 : 0.13;
+          grd.addColorStop(0, 'rgba(255,206,96,' + glowA + ')');
+          grd.addColorStop(0.55, 'rgba(255,170,50,' + (glowA * 0.4) + ')');
+          grd.addColorStop(1, 'rgba(255,150,30,0)');
+          ctx.fillStyle = grd;
+          ctx.fillRect(cx - gr, gy - gr, gr * 2, gr * 2);
+          ctx.restore();
+        }
+      }
+    }
+
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      if (s.kind === 'torch') {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 0.55 * s.flick;
+        drawStrips(s.art, s.sx, s.sy, s.sw, s.sh, s.depth);
+        ctx.restore();
+        ctx.globalAlpha = Math.min(1, 0.85 + s.flick * 0.2);
+        drawStrips(s.art, s.sx, s.sy, s.sw, s.sh, s.depth);
+        ctx.globalAlpha = 1;
+      } else if (s.kind === 'tree') {
+        const fog = 1 - Math.exp(-Math.max(0, s.depth - 6) * 0.09);
+        ctx.globalAlpha = 1 - fog * 0.45;
+        drawStrips(s.art, s.sx, s.sy, s.sw, s.sh, s.depth);
+        ctx.globalAlpha = 1;
+      } else {
+        drawStrips(s.art, s.sx, s.sy, s.sw, s.sh, s.depth);
+      }
+    }
+  }
+
+  /* ==================================================================
+     12. INTERACTIVE FX: E badge, ring, beam, particles
+     ================================================================== */
+  function chestScreen() {
+    projectX(CHEST_X, CHEST_Z, projTmp);
+    if (projTmp.ty <= 0.1) return null;
+    const sh = FOCAL * CHEST_H / projTmp.ty;
+    const sw = sh * (chestCanvas.width / chestCanvas.height);
+    const bottom = horizon + EYE * FOCAL / projTmp.ty;
+    return {
+      cx: projTmp.sx,
+      bottom: bottom,
+      top: bottom - sh * 0.64,
+      h: sh,
+      w: sw,
+      depth: projTmp.ty
+    };
+  }
+
+  function drawInteractFx() {
+    const c = chestScreen();
+    if (!c) return;
+    const zc = Math.max(0, Math.min(W - 1, Math.floor(c.cx / 2)));
+    const visible = zbuf[zc] > c.depth - 0.05;
+    if (!visible) return;
+
+    // golden ring on the ground while reachable
+    if (!opened && inRange) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = 'rgba(255,206,90,0.55)';
+      ctx.lineWidth = Math.max(2, c.h * 0.012);
+      ctx.beginPath();
+      ctx.ellipse(c.cx, c.bottom - 2, c.w * 0.52, c.w * 0.15, 0, 0, TAU);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // floating key badge
+    if (!opened && inRange) {
+      const bob = Math.sin(timeNow * 3.2) * 6;
+      const bx = c.cx;
+      const by = c.top - 34 + bob;
+      const size = Math.max(46, Math.min(74, c.h * 0.19));
+      ctx.save();
+      ctx.translate(bx, by);
+      // halo
+      ctx.globalCompositeOperation = 'lighter';
+      const hg = ctx.createRadialGradient(0, 0, 2, 0, 0, size * 1.25);
+      hg.addColorStop(0, 'rgba(255,214,110,.55)');
+      hg.addColorStop(1, 'rgba(255,170,40,0)');
+      ctx.fillStyle = hg;
+      ctx.fillRect(-size * 1.3, -size * 1.3, size * 2.6, size * 2.6);
+      ctx.globalCompositeOperation = 'source-over';
+      // keycap
+      roundedRect(ctx, -size / 2, -size / 2, size, size, size * 0.18);
+      ctx.fillStyle = 'rgba(14,16,22,0.88)';
+      ctx.fill();
+      ctx.lineWidth = Math.max(3, size * 0.055);
+      ctx.strokeStyle = '#ffd050';
+      ctx.stroke();
+      ctx.fillStyle = '#ffe9a4';
+      ctx.font = '800 ' + Math.round(size * 0.56) + 'px "Segoe UI", "Microsoft YaHei", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('E', 0, size * 0.03);
+      // pointer
+      ctx.beginPath();
+      ctx.moveTo(-size * 0.14, size / 2 + 2);
+      ctx.lineTo(size * 0.14, size / 2 + 2);
+      ctx.lineTo(0, size / 2 + size * 0.24);
+      ctx.closePath();
+      ctx.fillStyle = '#ffd050';
+      ctx.fill();
+      ctx.restore();
+    }
+
+    if (opened) {
+      // light beam
+      const a = Math.min(1, openness);
+      const beamW = Math.max(16, c.w * 0.18);
+      const beamTop = c.top - c.h * 2.4;
+      const bg = ctx.createLinearGradient(0, beamTop, 0, c.bottom);
+      bg.addColorStop(0, 'rgba(255,226,140,0)');
+      bg.addColorStop(0.45, 'rgba(255,214,110,' + (0.10 * a) + ')');
+      bg.addColorStop(1, 'rgba(255,190,70,' + (0.20 * a) + ')');
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = bg;
+      ctx.beginPath();
+      ctx.moveTo(c.cx - beamW * 0.18, beamTop);
+      ctx.lineTo(c.cx + beamW * 0.18, beamTop);
+      ctx.lineTo(c.cx + beamW, c.bottom);
+      ctx.lineTo(c.cx - beamW, c.bottom);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function spawnParticles() {
+    for (let i = 0; i < 58; i++) {
+      const a = Math.random() * TAU;
+      const sp = 0.25 + Math.random() * 0.85;
+      particles.push({
+        x: CHEST_X + Math.cos(a) * 0.28,
+        y: 0.42 + Math.random() * 0.35,
+        z: CHEST_Z + Math.sin(a) * 0.28,
+        vx: Math.cos(a) * sp,
+        vy: 1.1 + Math.random() * 2.2,
+        vz: Math.sin(a) * sp,
+        age: 0,
+        life: 1.0 + Math.random() * 1.3,
+        size: 0.9 + Math.random() * 1.3
+      });
+    }
+  }
+
+  function updateParticles(dt) {
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.age += dt;
+      if (p.age >= p.life) { particles.splice(i, 1); continue; }
+      p.vy -= 2.9 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.z += p.vz * dt;
+      if (p.y < 0.04) { p.y = 0.04; p.vy *= -0.34; }
+    }
+  }
+
+  function drawParticles() {
+    if (!particles.length) return;
+    const invDet = 1 / (planeX * dirZ - dirX * planeZ);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      const relX = p.x - px, relZ = p.z - pz;
+      const ty = invDet * (-planeZ * relX + planeX * relZ);
+      if (ty <= 0.15 || ty > 26) continue;
+      const tx = invDet * (dirZ * relX - dirX * relZ);
+      const sx = (W / 2) * (1 + tx / ty);
+      const sy = horizon + (EYE - p.y) * FOCAL / ty;
+      if (sx < -20 || sx > W + 20) continue;
+      const k = 1 - p.age / p.life;
+      const rad = Math.max(1, p.size * (FOCAL / ty) * 0.009);
+      ctx.globalAlpha = Math.max(0, k) * 0.85;
+      const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, rad * 2.2);
+      g.addColorStop(0, 'rgba(255,244,190,1)');
+      g.addColorStop(0.4, 'rgba(255,206,90,0.8)');
+      g.addColorStop(1, 'rgba(255,160,30,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(sx - rad * 2.2, sy - rad * 2.2, rad * 4.4, rad * 4.4);
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  /* ==================================================================
+     13. RENDER
+     ================================================================== */
+  function render() {
+    camera();
+
+    if (SCENE === 'fortnite') {
+      drawSky();
+    } else {
+      ctx.fillStyle = '#06060a';
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    castFloor();
+
+    ctx.imageSmoothingEnabled = true;
+    castWalls();
+
+    paintChest(openness);
+    drawSprites();
+    drawInteractFx();
+    drawParticles();
+  }
+
+  /* ==================================================================
+     14. SIMULATION
+     ================================================================== */
+  function isBlocked(x, z) {
+    const r = PLAYER_R;
+    const x0 = Math.floor(x - r), x1 = Math.floor(x + r);
+    const z0 = Math.floor(z - r), z1 = Math.floor(z + r);
+    for (let zz = z0; zz <= z1; zz++) {
+      for (let xx = x0; xx <= x1; xx++) {
+        if (xx < 0 || xx >= MW || zz < 0 || zz >= MH) return true;
+        if (MAP[zz][xx] > 0) return true;
+      }
+    }
+    return false;
+  }
+
+  function update(dt) {
+    timeNow += dt;
+    lightFlicker = 0.9 + 0.1 * Math.sin(timeNow * 12.0) + 0.05 * Math.sin(timeNow * 27.0);
+
+    // ---- turning ----
+    const turn = (keys['arrowright'] ? 1 : 0) - (keys['arrowleft'] ? 1 : 0);
+    angle += turn * TURN_SPEED * dt;
+    if (angle > Math.PI) angle -= TAU;
+    if (angle < -Math.PI) angle += TAU;
+
+    // ---- movement ----
+    let fwd = (keys['w'] || keys['arrowup'] ? 1 : 0) - (keys['s'] || keys['arrowdown'] ? 1 : 0);
+    let strafe = (keys['d'] ? 1 : 0) - (keys['a'] ? 1 : 0);
+    const moving = fwd !== 0 || strafe !== 0;
+
+    if (moving) {
+      const len = Math.hypot(fwd, strafe) || 1;
+      fwd /= len; strafe /= len;
+      const spd = (keys['shift'] ? RUN_SPEED : WALK_SPEED) * dt;
+      const dx = (dirX * fwd - dirZ * strafe) * spd;
+      const dz = (dirZ * fwd + dirX * strafe) * spd;
+      if (!isBlocked(px + dx, pz)) px += dx;
+      if (!isBlocked(px, pz + dz)) pz += dz;
+      bobT += dt * (keys['shift'] ? 13 : 9);
+      bobY = Math.sin(bobT) * 3.4;
+    } else {
+      bobY *= 0.86;
+      bobT += dt * 2;
+    }
+
+    // ---- chest soft collider ----
+    let ddx = px - CHEST_X, ddz = pz - CHEST_Z;
+    let dd = Math.hypot(ddx, ddz);
+    if (dd < CHEST_PUSH) {
+      if (dd < 0.0001) { ddx = 0; ddz = -1; dd = 1; }
+      px = CHEST_X + (ddx / dd) * CHEST_PUSH;
+      pz = CHEST_Z + (ddz / dd) * CHEST_PUSH;
+      if (isBlocked(px, pz)) { px = CHEST_X; pz = CHEST_Z + CHEST_PUSH; }
+    }
+
+    // ---- jump ----
+    if (jumpQueued) {
+      jumpQueued = false;
+      if (jumpY <= 0 && jumpV <= 0) jumpV = 1.55;
+    }
+    if (jumpV !== 0 || jumpY > 0) {
+      jumpY += jumpV * dt;
+      jumpV -= 5.2 * dt;
+      if (jumpY <= 0) { jumpY = 0; jumpV = 0; }
+    }
+
+    // ---- chest lid animation (~0.5 s) ----
+    const target = opened ? 1 : 0;
+    if (openness !== target) {
+      const dir = target > openness ? 1 : -1;
+      openness += dir * dt * 2.1;
+      if ((dir > 0 && openness > 1) || (dir < 0 && openness < 0)) openness = target;
+    }
+
+    if (AUTO && autoAssist && !opened) {
+      const dx2 = CHEST_X - px, dz2 = CHEST_Z - pz;
+      const d2 = Math.hypot(dx2, dz2);
+      if (d2 > 2.1) {
+        const k = Math.min(0.09, d2 - 2.1);
+        px += (dx2 / d2) * k;
+        pz += (dz2 / d2) * k;
+        angle = Math.atan2(dz2, dx2);
+      }
+    }
+
+    updateParticles(dt);
+    refreshDerived();
+  }
+
+  function refreshDerived() {
+    distance = Math.hypot(CHEST_X - px, CHEST_Z - pz);
+    inRange = distance <= INTERACT_RANGE;
+
+    // sync the public object
+    api.distance = distance;
+    api.inRange = inRange;
+    api.opened = opened;
+    api.promptVisible = (inRange && !opened);
+    api.steps = steps;
+    api.player.x = px;
+    api.player.z = pz;
+    api.player.angle = angle;
+    api.chest.opened = opened;
+
+    // HUD
+    distEl.textContent = distance.toFixed(1);
+    readoutEl.classList.toggle('range', inRange && !opened);
+    promptEl.classList.toggle('show', inRange && !opened);
+
+    applyTitle();
+    stateEl.textContent = titleText() +
+      ' | dist=' + distance.toFixed(2) +
+      ' | opened=' + (opened ? 1 : 0) +
+      ' | steps=' + steps +
+      ' | pos=' + px.toFixed(2) + ',' + pz.toFixed(2) +
+      ' | ang=' + angle.toFixed(2);
+  }
+
+  function titleText() {
+    if (opened) return 'FORWEB chest | OPENED';
+    if (inRange) return 'FORWEB chest | IN RANGE (E)';
+    return 'FORWEB chest | far';
+  }
+
+  let lastTitle = '';
+  function applyTitle() {
+    const t = titleText();
+    if (t !== lastTitle) {
+      lastTitle = t;
+      document.title = t;
+    }
+  }
+
+  /* ==================================================================
+     15. INTERACTION
+     ================================================================== */
+  function openChest() {
+    if (opened) return;
+    opened = true;
+    openedAt = timeNow;
+    spawnParticles();
+    bannerEl.classList.add('show');
+    lootEl.classList.add('show');
+    refreshDerived();
+  }
+
+  function tryInteract() {
+    if (opened) return;
+    if (distance > INTERACT_RANGE) {
+      // tiny feedback pulse on the readout
+      readoutEl.style.transition = 'none';
+      readoutEl.style.transform = 'translateX(4px)';
+      setTimeout(function () {
+        readoutEl.style.transition = 'transform .18s ease';
+        readoutEl.style.transform = 'translateX(0)';
+      }, 60);
+      return;
+    }
+    openChest();
+  }
+
+  function normKey(e) {
+    let k = (e.key || '').toLowerCase();
+    if (k === ' ' || k === 'spacebar') return ' ';
+    if (k === 'space') return ' ';
+    if (k === 'esc') return 'escape';
+    if (!k && e.code) {
+      // fallback only - event.key is always preferred
+      const c = e.code.toLowerCase();
+      if (c.indexOf('key') === 0) k = c.slice(3);
+      else if (c.indexOf('arrow') === 0) k = c;
+      else if (c === 'space') k = ' ';
+    }
+    return k;
+  }
+
+  function onKeyDown(e) {
+    const k = normKey(e);
+    if (k === ' ' || k.indexOf('arrow') === 0) e.preventDefault();
+    if (k === 'e') { e.preventDefault(); tryInteract(); return; }
+    if (k === ' ') jumpQueued = true;
+    if (MOVE_KEYS.has(k) && !e.repeat) steps++;
+    keys[k] = true;
+  }
+
+  function onKeyUp(e) {
+    const k = normKey(e);
+    if (k === ' ' || k.indexOf('arrow') === 0) e.preventDefault();
+    keys[k] = false;
+  }
+
+  window.addEventListener('keydown', onKeyDown, { passive: false });
+  window.addEventListener('keyup', onKeyUp, { passive: false });
+
+  // mouse drag look (no pointer lock needed)
+  let dragging = false, lastMX = 0, lastMY = 0;
+  // A raw-mouse game must respond to relative movement without a held button,
+  // otherwise an automation that sends move_relative() cannot turn the camera.
+  // Pointer lock gives us movementX, and `?sens=` lets us simulate a game with
+  // different mouse sensitivity when testing the auto-tuner.
+  const MOUSE_SENS = (function () {
+    const s = parseFloat(new URLSearchParams(location.search).get('sens'));
+    return Number.isFinite(s) && s > 0 ? s : 0.0034;
+  })();
+  view.addEventListener('click', function () {
+    if (!document.pointerLockElement && view.requestPointerLock) {
+      try { view.requestPointerLock(); } catch (err) { /* drag fallback */ }
+    }
+  });
+  document.addEventListener('mousemove', function (e) {
+    if (document.pointerLockElement !== view) return;
+    angle += (e.movementX || 0) * MOUSE_SENS;
+    pitchPx = Math.max(-H * 0.32, Math.min(H * 0.32, pitchPx - (e.movementY || 0) * 0.85));
+  });
+  view.addEventListener('pointerdown', function (e) {
+    dragging = true; lastMX = e.clientX; lastMY = e.clientY;
+    try { view.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  });
+  window.addEventListener('pointermove', function (e) {
+    if (!dragging || document.pointerLockElement === view) return;
+    const dx = e.clientX - lastMX, dy = e.clientY - lastMY;
+    lastMX = e.clientX; lastMY = e.clientY;
+    angle += dx * MOUSE_SENS;
+    pitchPx = Math.max(-H * 0.32, Math.min(H * 0.32, pitchPx - dy * 0.85));
+  });
+  window.addEventListener('pointerup', function () { dragging = false; });
+  window.addEventListener('blur', function () {
+    for (const k in keys) keys[k] = false;
+    dragging = false;
+  });
+
+  /* ==================================================================
+     16. RESIZE + MAIN LOOP
+     ================================================================== */
+  function resize() {
+    const w = Math.max(320, window.innerWidth || 1280);
+    const h = Math.max(240, window.innerHeight || 800);
+    W = w; H = h;
+    view.width = w; view.height = h;
+    view.style.width = w + 'px';
+    view.style.height = h + 'px';
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    floorCanvas.width = Math.ceil(w / 2);
+    floorCanvas.height = Math.ceil(h / 2);
+    floorImg = floorCtx.createImageData(floorCanvas.width, floorCanvas.height);
+    zbuf = new Float32Array(w);
+    FOCAL = (w / 2) / PLANE_LEN;
+    render();
+  }
+
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', resize);
+
+  let lastT = 0;
+  let lastRAF = -1e9;
+  let rafId = 0;
+  let timerId = 0;
+  let watchdogId = 0;
+  let loopStopped = true;
+
+  // Auto-demo runs on timers so the whole demo is reproducible and so
+  // Chrome's virtual-time budget can complete for headless screenshots.
+  // Normal play uses requestAnimationFrame.
+  const USE_TIMER_LOOP = AUTO;
+
+  function tick() {
+    // single monotonic clock: rAF timestamps and performance.now() can
+    // disagree (especially under virtual time), and a negative dt would
+    // push the player backwards.
+    const now = performance.now();
+    let dt = lastT ? (now - lastT) / 1000 : 0.016;
+    if (!(dt > 0)) dt = 0.016;
+    dt = Math.min(0.05, dt);
+    lastT = now;
+    update(dt);
+    render();
+  }
+
+  function loopStep() {
+    lastRAF = performance.now();
+    tick();
+    if (loopStopped) return;
+    if (USE_TIMER_LOOP) timerId = setTimeout(loopStep, 16);
+    else rafId = requestAnimationFrame(loopStep);
+  }
+
+  function startLoop() {
+    if (!loopStopped) return;
+    loopStopped = false;
+    lastT = 0;
+    if (USE_TIMER_LOOP) {
+      timerId = setTimeout(loopStep, 16);
+    } else {
+      rafId = requestAnimationFrame(loopStep);
+      // Some headless / offscreen contexts never fire requestAnimationFrame.
+      // Only step the sim when no frame arrived for 250 ms, so a healthy
+      // browser is never double-stepped.
+      watchdogId = setInterval(function () {
+        if (!loopStopped && performance.now() - lastRAF > 250) tick();
+      }, 100);
+    }
+  }
+
+  // Freeze on the final frame once the demo is over (auto mode only).
+  function stopLoop() {
+    if (loopStopped) return;
+    loopStopped = true;
+    cancelAnimationFrame(rafId);
+    clearTimeout(timerId);
+    clearInterval(watchdogId);
+    render();
+  }
+
+  /* ==================================================================
+     17. PUBLIC API + RESET
+     ================================================================== */
+  const api = {
+    scene: SCENE,
+    player: { x: SPAWN.x, z: SPAWN.z, angle: SPAWN.angle },
+    chest: { x: CHEST_X, z: CHEST_Z, opened: false },
+    distance: 0,
+    inRange: false,
+    promptVisible: false,
+    opened: false,
+    steps: 0,
+    reset: reset
+  };
+  window.__forweb = api;
+
+  function reset() {
+    px = SPAWN.x; pz = SPAWN.z; angle = SPAWN.angle;
+    pitchPx = 0; bobY = 0; bobT = 0; jumpY = 0; jumpV = 0;
+    opened = false; openness = 0; openedAt = -1;
+    autoAssist = false;
+    particles.length = 0;
+    steps = 0;
+    for (const k in keys) keys[k] = false;
+    bannerEl.classList.remove('show');
+    lootEl.classList.remove('show');
+    refreshDerived();
+    render();
+    startLoop();
+    return api;
+  }
+
+  /* ==================================================================
+     18. AUTO DEMO (?auto=1) - drives the real key handlers
+     ================================================================== */
+  function dispatchKey(type, key) {
+    window.dispatchEvent(new KeyboardEvent(type, { key: key, bubbles: true, cancelable: true }));
+  }
+
+  function startAutoDemo() {
+    // hold W for ~1.6 s to close from 4.0 m to inside 2.4 m
+    setTimeout(function () { dispatchKey('keydown', 'w'); }, 600);
+    setTimeout(function () {
+      dispatchKey('keyup', 'w');
+      autoAssist = true;        // guarantee the end position even if rAF is throttled
+    }, 2200);
+    setTimeout(function () { autoAssist = false; }, 2520);
+    setTimeout(function () { dispatchKey('keydown', 'e'); }, 2680);
+    setTimeout(function () {
+      // if the frame clock was starved, force the final visual state
+      if (opened) { openness = 1; }
+      render();
+    }, 3400);
+    setTimeout(function () {
+      if (!opened && distance <= INTERACT_RANGE) openChest();
+      render();
+    }, 3800);
+    setTimeout(function () {
+      // freeze the last frame so headless virtual time can settle
+      if (opened) { openness = 1; }
+      stopLoop();
+    }, 4400);
+  }
+
+  /* ==================================================================
+     19. BOOT
+     ================================================================== */
+  if (SCENE === 'dungeon') buildLightGrid();
+  resize();
+  reset();
+  startLoop();
+  if (AUTO) startAutoDemo();
+
+  // expose a couple of internals for harness-side debugging (non-contract)
+  window.__forwebDebug = {
+    render: render,
+    openChest: openChest,
+    get keys() { return keys; }
+  };
+})();
+</script>
+</body>
+</html>

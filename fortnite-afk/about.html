@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chest Opener — a vision model plays a 3D game</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #080b12;
+    --card: #0d121b;
+    --line: #1e2637;
+    --ink: #e8edf7;
+    --muted: #8b97ad;
+    --gold: #e8c170;
+    --green: #3ddc84;
+    --red: #ff5d5d;
+    --blue: #6ea8fe;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.65 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 46px 26px 90px; }
+  a { color: var(--gold); }
+  .crumb {
+    font: 600 12px/1 "Segoe UI", sans-serif; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--muted); text-decoration: none;
+  }
+  .crumb:hover { color: var(--gold); }
+  h1 { font-size: 40px; line-height: 1.1; margin: 18px 0 10px; letter-spacing: -.01em; }
+  .lede { font-size: 18px; color: #b9c6db; max-width: 760px; margin: 0 0 26px; }
+  .play {
+    display: inline-block; margin: 4px 0 34px; padding: 13px 22px;
+    background: linear-gradient(180deg, #f0cf86, #d9ae57); color: #1a1204;
+    border-radius: 10px; font-weight: 800; text-decoration: none;
+    letter-spacing: .02em;
+  }
+  .play:hover { filter: brightness(1.06); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 0 0 36px; }
+  .stat { border: 1px solid var(--line); background: var(--card); border-radius: 12px; padding: 14px 16px; }
+  .stat b { display: block; font-size: 26px; line-height: 1.2; color: var(--gold); }
+  .stat span { color: var(--muted); font-size: 12.5px; }
+  figure { margin: 22px 0; }
+  figure img { width: 100%; border-radius: 12px; border: 1px solid var(--line); display: block; }
+  figcaption { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  h2 { font-size: 23px; margin: 46px 0 12px; letter-spacing: -.01em; }
+  h3 { font-size: 16px; margin: 26px 0 8px; color: #cfdbee; }
+  p { margin: 10px 0; color: #c2cee2; }
+  code, pre { font-family: Consolas, "Cascadia Mono", monospace; }
+  code { font-size: 13.5px; color: #d7e2f4; background: #131a27; padding: 1px 5px; border-radius: 4px; }
+  pre {
+    background: #0a0f18; border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px; overflow-x: auto; font-size: 13px; line-height: 1.55; color: #c7d4ea;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 12px 0; }
+  th, td { text-align: left; padding: 9px 11px; border-bottom: 1px solid #1b2332; vertical-align: top; }
+  th { color: var(--muted); font-size: 11px; letter-spacing: .07em; text-transform: uppercase; }
+  td.ok { color: var(--green); font-weight: 700; }
+  td.bad { color: var(--red); font-weight: 700; }
+  .note { border-left: 3px solid var(--gold); background: #12100a; padding: 12px 16px; border-radius: 0 10px 10px 0; color: #d9c9a4; font-size: 14px; }
+  .warn { border-left: 3px solid var(--red); background: #170d0d; padding: 12px 16px; border-radius: 0 10px 10px 0; color: #e6bcbc; font-size: 14px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } h1 { font-size: 31px; } }
+  ul { color: #c2cee2; padding-left: 20px; }
+  li { margin: 6px 0; }
+  footer { margin-top: 54px; border-top: 1px solid var(--line); padding-top: 18px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<a class="crumb" href="../">&larr; Vibe Coding Showcase</a>
+<h1>Chest Opener</h1>
+<p class="lede">
+  A vision model looks at a 3D game, decides what to do, and the code presses the keys.
+  The chest in front of you is opened by <em>Jev 1.14</em> choosing <code>interact</code> —
+  not by a scripted click. Walk it, watch the HUD, then read how the loop was measured.
+</p>
+<a class="play" href="./">Play the scene &rarr;</a>
+
+<div class="grid">
+  <div class="stat"><b>6 / 6</b><span>task suite passed</span></div>
+  <div class="stat"><b>1.95 s</b><span>per decision (was 5.7 s)</span></div>
+  <div class="stat"><b>3</b><span>decisions to open the chest</span></div>
+  <div class="stat"><b>84</b><span>unit tests green</span></div>
+</div>
+
+<h2>What this build is</h2>
+<p>
+  A small Fortnite-style first-person scene whose only job is to make a model's decision
+  <strong>observable</strong>. The page publishes its state in the window title:
+  <code>far</code>, <code>IN RANGE (E)</code>, <code>OPENED</code>. The test harness
+  screenshots the real browser window, asks the model, injects the keys with
+  <code>SendInput</code>, and reads the title back. Nothing but a genuine <kbd>E</kbd>
+  that landed on the page can flip that title.
+</p>
+
+<figure>
+  <img src="shots/chest-far.png" alt="Chest four metres away, out of interact range">
+  <figcaption>The start state: 4.0 m out, <code>FORWEB chest | far</code>. The model has to
+  decide to walk, not to press E.</figcaption>
+</figure>
+
+<figure>
+  <img src="shots/chest-opened.png" alt="Chest opened with a legendary loot card">
+  <figcaption>After the model chose <code>interact</code>: lid open, light beam, loot card,
+  and the title is now <code>OPENED</code>.</figcaption>
+</figure>
+
+<h2>The loop</h2>
+<pre>capture window ──▶ Jev (State / Questions) ──▶ plan ──▶ SendInput ──▶ read title
+      ▲                                                                    │
+      └──────────────────────── next decision ◀───────────────────────────┘</pre>
+<p>
+  The model answers typed questions, not free-form JSON: <code>action</code> (move, strafe,
+  jump, interact, attack, aim, reload, look), <code>hold</code> (0.12 / 0.35 / 0.8 / 1.6 s),
+  <code>repeat</code> (1–3), plus a <code>Box</code> for the target and a <code>path</code>
+  judgement (clear / low / high wall / hazard). The code maps those choices to exact keys —
+  the model decides <em>what</em>, the code owns <em>how</em>.
+</p>
+
+<h2>Six tasks, not one happy path</h2>
+<table>
+  <thead><tr><th>Task</th><th>Scene</th><th>Driver</th><th>What it proves</th><th>Result</th></tr></thead>
+  <tbody>
+    <tr><td>keyboard_fortnite</td><td>outdoor</td><td>scripted W + E</td><td>the page and the key path work at all</td><td class="ok">PASS</td></tr>
+    <tr><td>keyboard_dungeon</td><td>dungeon</td><td>scripted W + E</td><td>the second scene is wired the same way</td><td class="ok">PASS</td></tr>
+    <tr><td>negative_fortnite</td><td>outdoor</td><td>E at 4 m</td><td>the game refuses an out-of-range action</td><td class="ok">PASS</td></tr>
+    <tr><td>idempotent_fortnite</td><td>outdoor</td><td>E twice</td><td>an opened chest stays opened</td><td class="ok">PASS</td></tr>
+    <tr><td>vision_fortnite</td><td>outdoor</td><td>Jev</td><td>the model walks, then chooses interact</td><td class="ok">PASS · 3 steps</td></tr>
+    <tr><td>vision_dungeon</td><td>dungeon</td><td>Jev</td><td>the same policy transfers to a new look</td><td class="ok">PASS</td></tr>
+  </tbody>
+</table>
+<figure>
+  <img src="shots/dungeon.png" alt="The same chest in a dark dungeon scene">
+  <figcaption>The transfer scene. Same interaction contract, different art direction, lighting
+  and spawn distance — the model still finds the chest and opens it.</figcaption>
+</figure>
+
+<h2>Latency: 5.7 s → 1.95 s per decision</h2>
+<p>
+  The first version felt unplayable because every decision paid for a new TLS handshake and
+  uploaded a 1280 px PNG. A/B on the same frame, same model, median of four calls:
+</p>
+<table>
+  <thead><tr><th>Configuration</th><th>Median</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>1280 px + fresh connection</td><td class="bad">5734 ms</td><td>DNS + TCP + TLS on every call</td></tr>
+    <tr><td>1280 px + reused socket</td><td>3094 ms</td><td>handshake paid once</td></tr>
+    <tr><td>960 px + reused socket</td><td>2992 ms</td><td>upload shrinks, not enough</td></tr>
+    <tr><td>768 px + reused socket</td><td class="ok">1954 ms</td><td>upload halved, the knee of the curve</td></tr>
+  </tbody>
+</table>
+<p>
+  Three changes: a persistent <code>HTTPConnection</code> with proxy tunnelling and
+  one-shot reconnect, capture at 768 px, and a 12-question profile that drops the fields the
+  planner never reads (output tokens 708 → 525).
+</p>
+
+<h2>It should not look like a machine</h2>
+<div class="cols">
+  <div>
+    <h3>Turn</h3>
+    <p>A single <code>move_relative(320)</code> whips the camera in one frame. The turn is now
+    split into 20 ms ticks with a smoothstep speed curve: 320 px becomes 20 events over 400 ms,
+    largest tick 26 px, total displacement exact.</p>
+  </div>
+  <div>
+    <h3>Hand tremor</h3>
+    <p>Two slow sinusoids (drift), a per-tick jitter (tremor) and an occasional tiny flick
+    (saccade) are added through the same mouse path. Saccade signs alternate, so a long session
+    never slowly rotates away from the target.</p>
+  </div>
+</div>
+<pre>turn +320px
+  old : 1 mouse event, +320px, ~0 ms  (camera whip)
+  new : 20 events, 400 ms, max 26px/tick
+  sum : 320px (exact), ease-in/out via smoothstep
+
+noise: drift ±5px · tremor 0.8px/tick · saccade 7px every 2.5–7s</pre>
+<p>
+  Movement is held between decisions instead of released every step, hold durations are
+  jittered ±8–12 %, and if an <kbd>E</kbd> changes nothing on screen the next plan walks
+  forward instead of pressing again.
+</p>
+
+<h2>No calibration: the loop corrects itself</h2>
+<p>
+  Mouse sensitivity differs per game and can change mid-session, so nothing is measured
+  or assumed. Every decision Jev re-reads the target box, and the code takes a
+  <em>bounded fraction</em> of the remaining offset — the gain, not a constant in degrees.
+  If the last turn helped, the gain creeps up; if it did not, the gain is cut. A wrong
+  gain costs one frame of convergence, never the target.
+</p>
+<pre>target +0.30  ──turn 200px──▶  target +0.05   gain 0.60 → 0.66
+target +0.32  ──turn 260px──▶  target +0.41   gain 0.66 → 0.36   (overshoot: back off)</pre>
+<p>
+  Movement is the same story: approach speed is unknown, so the loop walks, looks, and
+  presses <kbd>E</kbd>; if the press changed nothing on screen it walks further. A sprint
+  and a crawl both converge without a constant.
+</p>
+
+<h3>Walking and turning at the same time</h3>
+<p>
+  The first version stopped, turned, then walked — two separate beats, which reads as a
+  machine. The movement keys now go down <em>before</em> the camera swing, so the character
+  is already moving while the view eases toward the target. Interact, jump and clicks keep
+  the strict order because they need a stable base.
+</p>
+
+<h2>Code</h2>
+<pre>bot/
+  afk/
+    jev.py          System One client: keep-alive socket, timings, box validation
+    explore.py      model choice -> concrete keys (action / hold / repeat / path)
+    motion.py       eased turning, hand tremor, jitter
+    autotune.py     sensitivity probe from frame correlation
+    controller.py   lobby -> queue -> match -> leave state machine
+    win32.py        window capture, SendInput / PostMessage
+  tools/
+    web_task_suite.py   the six tasks above
+    bench_jev.py        latency A/B
+    tune_game.py        sensitivity measurement
+    turn_demo.py        turn profile chart
+  tests/          84 unittest cases, stdlib only</pre>
+
+<div class="note">
+  Everything is Python standard library — <code>ctypes</code> for GDI capture and input,
+  <code>urllib</code> for the API, <code>zlib</code> for PNG. No pip install, no SDK.
+</div>
+
+<h2>Honest limits</h2>
+<ul>
+  <li>The browser scene is a <em>stand-in</em>: Fortnite itself is not installed on the test
+      machine, so the live-game path is documented but unverified.</li>
+  <li>The model is small and sometimes presses <kbd>E</kbd> a step early; the page refuses it
+      and the no-op guard turns that into a walk. That recovery is visible in the dungeon run.</li>
+  <li>768 px is the latency/accuracy knee on this uplink. On a faster link the image-size win
+      shrinks; the connection reuse does not.</li>
+</ul>
+
+<div class="warn">
+  Automation violates the terms of service of most online games and can get an account banned.
+  This exhibit is a study of vision-model control loops, tested against a local page and an
+  offline simulator — not a tool to run on a live account.
+</div>
+
+<footer>
+  Built with Jev 1.14 (TypeSafe System One) · single-file canvas renderer · no external assets ·
+  <a href="./">play the scene</a> · <a href="../">back to the showcase</a>
+</footer>
+
+</div>
+</body>
+</html>
