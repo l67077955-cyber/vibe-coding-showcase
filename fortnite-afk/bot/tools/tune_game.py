@@ -73,6 +73,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--browser", choices=["edge", "chrome"], default="edge")
     p.add_argument("--write", action="store_true",
                    help="write the measured value into config.json")
+    p.add_argument("--no-drag", dest="drag", action="store_false",
+                   help="do not hold the mouse button during the probe")
+    p.set_defaults(drag=True)
     args = p.parse_args(argv)
 
     enable_dpi_awareness()
@@ -95,18 +98,30 @@ def main(argv: list[str] | None = None) -> int:
         inputs = make_input(cfg, hwnd, __import__("random").Random())
         capture = ScreenCapture(max_width=cfg.capture.max_width)
         rect = harness.capture_rect(hwnd)
+        # Chromium needs one click to focus the window and a second to grant
+        # pointer lock; a single click measures "no shift" on the first trial.
         inputs.click(rect.left + rect.width // 2, rect.top + rect.height // 2)
-        time.sleep(0.6)
+        time.sleep(0.4)
+        inputs.click(rect.left + rect.width // 2, rect.top + rect.height // 2)
+        time.sleep(0.5)
 
         for trial in range(1, args.trials + 1):
             harness.ensure_focus(hwnd, log)
             before = capture.grab(harness.capture_rect(hwnd))
             delta = args.delta if trial % 2 else -args.delta
-            # Split the probe across a few ticks: a single 180 px jump can be
+            # Pointer lock is unreliable under automation, so the probe holds
+            # the left button: the page (like many MMOs) drags the camera, and
+            # the cursor delta still goes through the same OS path.
+            if args.drag:
+                inputs.mouse_down("left")
+                time.sleep(0.05)
+            # Split the probe across a few ticks: a single jump can be
             # coalesced by the OS and under-measure the real sensitivity.
             for _ in range(6):
                 inputs.move_relative(delta // 6, 0)
                 time.sleep(0.02)
+            if args.drag:
+                inputs.mouse_up("left")
             time.sleep(0.45)
             after = capture.grab(harness.capture_rect(hwnd))
             m = measure_sensitivity(before, after, delta)

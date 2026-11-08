@@ -22,25 +22,27 @@ from typing import Sequence
 from .capture import Frame
 
 
-def _profile(frame: Frame, cols: int = 96, row_lo: float = 0.20,
-             row_hi: float = 0.80) -> list[float]:
-    """Average luminance per column, sampled coarsely over the middle rows.
+def _profile(frame: Frame, cols: int = 96, row_lo: float = 0.35,
+             row_hi: float = 0.85) -> list[float]:
+    """Average horizontal *edge* strength per column, over the middle rows.
 
-    The middle band avoids the sky and the ground, which barely move when the
-    camera pans and would dilute the correlation.
+    Raw luminance correlates weakly on a 3D scene: large flat areas (sky,
+    grass) dominate the mean and repeated wall patterns produce false peaks.
+    Vertical edges — tree trunks, wall corners, the chest outline — are what
+    actually moves when the camera pans, so the profile is |d luma / dx|.
     """
     if frame.rgb is None or frame.width <= 0 or frame.height <= 0:
         return []
     width, height = frame.width, frame.height
     y0 = max(0, int(height * row_lo))
     y1 = min(height, int(height * row_hi))
-    if y1 - y0 < 2:
+    if y1 - y0 < 2 or width < 4:
         return []
     y_step = max(1, (y1 - y0) // 24)
-    x_step = max(1, width // (cols * 3))
+    x_step = max(1, width // (cols * 4))
     profile: list[float] = []
     for c in range(cols):
-        x0 = int(width * c / cols)
+        x0 = max(1, int(width * c / cols))
         x1 = max(x0 + 1, int(width * (c + 1) / cols))
         total = 0.0
         count = 0
@@ -48,8 +50,13 @@ def _profile(frame: Frame, cols: int = 96, row_lo: float = 0.20,
             row = y * width
             for x in range(x0, x1, x_step):
                 i = (row + x) * 3
-                total += (frame.rgb[i] * 0.299 + frame.rgb[i + 1] * 0.587
-                          + frame.rgb[i + 2] * 0.114)
+                j = (row + x - 1) * 3
+                k = (row + x + 1) * 3
+                left = (frame.rgb[j] * 0.299 + frame.rgb[j + 1] * 0.587
+                        + frame.rgb[j + 2] * 0.114)
+                right = (frame.rgb[k] * 0.299 + frame.rgb[k + 1] * 0.587
+                         + frame.rgb[k + 2] * 0.114)
+                total += abs(right - left)
                 count += 1
         profile.append(total / count if count else 0.0)
     return profile
@@ -140,3 +147,56 @@ def estimate_closing_rate(height_before: float, height_after: float,
     # Positive when the target is getting closer (height growing).
     rate = (1.0 / height_before - 1.0 / height_after) / dt_s
     return rate
+
+
+class SensitivityTracker:
+    """Learn px-per-screen from the loop itself, while playing.
+
+    Frame correlation is biased on a wide-FOV perspective scene: the same pan
+    is a large shift near the edges and a small one in the centre, so a single
+    correlation under-reports and the bias depends on the game's FOV. The loop
+    already has better data than that:
+
+        target was at +0.30, we turned 220 px, target is now at +0.02
+
+    That is a direct measurement of the controller's own transfer function, in
+    the units the controller uses, and it needs no probe and no FOV knowledge.
+    Each observation is folded in with an exponential moving average, so one
+    noisy detection cannot wreck the calibration.
+    """
+
+    def __init__(self, initial: float = 1.0, alpha: float = 0.35,
+                 lo: float = 0.05, hi: float = 50.0) -> None:
+        self.value = max(lo, min(hi, float(initial)))
+        self.alpha = alpha
+        self.lo = lo
+        self.hi = hi
+        self.samples = 0
+        self.last_measurement: float | None = None
+
+    def observe(self, offset_before: float, turn_px: int,
+                offset_after: float) -> float | None:
+        """Fold one "turned N px, target moved M screens" observation in.
+
+        Returns the new estimate, or None when the sample is too small, points
+        the wrong way (a bad detection) or barely moved (nothing to learn).
+        """
+        if abs(turn_px) < 40:
+            return None
+        moved = float(offset_before) - float(offset_after)
+        if abs(moved) < 0.02:
+            return None
+        # Turning right must move the target left. A sample that says otherwise
+        # is a mis-detection, not a sensitivity datum.
+        if (moved > 0) != (turn_px > 0):
+            return None
+        measurement = abs(turn_px) / abs(moved)
+        if not (self.lo <= measurement <= self.hi):
+            return None
+        self.last_measurement = measurement
+        if self.samples == 0:
+            self.value = measurement
+        else:
+            self.value = (1.0 - self.alpha) * self.value + self.alpha * measurement
+        self.samples += 1
+        return self.value

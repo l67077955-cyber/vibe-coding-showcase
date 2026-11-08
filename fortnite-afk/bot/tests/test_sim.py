@@ -46,6 +46,7 @@ class SimulationTests(unittest.TestCase):
     def test_smooth_turn_is_many_small_steps(self):
         """One decision must not whip the camera in a single 300 px jump."""
         controller, _game, _vision, inputs = make_controller(cycles=1)
+        controller.cfg.turn.noise = False  # exact-sum invariant, noise adds tremor
         controller.last_frame = Frame(width=768, height=432, rgb=None,
                                       rect=Rect(0, 0, 768, 432), scale=1.0,
                                       captured_at=0.0)
@@ -58,6 +59,52 @@ class SimulationTests(unittest.TestCase):
         self.assertGreater(expected, 0)
         self.assertEqual(sum(a[1][0] for a in looks), expected)
         self.assertLessEqual(max(abs(a[1][0]) for a in looks), 40)
+
+    def test_turn_with_noise_stays_on_target(self):
+        """Hand tremor must not throw the turn off by more than a few pixels."""
+        controller, _game, _vision, inputs = make_controller(cycles=1)
+        controller.cfg.turn.noise = True
+        controller.last_frame = Frame(width=768, height=432, rgb=None,
+                                      rect=Rect(0, 0, 768, 432), scale=1.0,
+                                      captured_at=0.0)
+        plan = ExplorePlan(keys=[], hold_s=0.2, aim_norm=0.30, action="stop")
+        inputs.actions.clear()
+        controller._execute_plan(plan, now=0.0)
+        looks = [a for a in inputs.actions if a[0] == "look"]
+        expected = aim_px(0.80, 768, controller.cfg.turn)
+        total = sum(a[1][0] for a in looks)
+        self.assertLessEqual(abs(total - expected), 40)
+
+    def test_move_and_turn_overlap(self):
+        """Walking and turning must overlap, not happen in two separate beats."""
+        controller, _game, _vision, inputs = make_controller(cycles=1)
+        controller.cfg.turn.noise = False
+        controller.last_frame = Frame(width=768, height=432, rgb=None,
+                                      rect=Rect(0, 0, 768, 432), scale=1.0,
+                                      captured_at=0.0)
+        plan = ExplorePlan(keys=["w"], hold_s=0.5, aim_norm=0.30,
+                           action="move_forward", continuous=True)
+        inputs.actions.clear()
+        controller._execute_plan(plan, now=0.0)
+        kinds = [a[0] for a in inputs.actions]
+        self.assertIn("down", kinds)
+        self.assertIn("look", kinds)
+        self.assertLess(kinds.index("down"), kinds.index("look"))
+        self.assertNotIn("up", kinds)  # keys stay held for the next decision
+
+    def test_aim_gain_adapts_to_result(self):
+        controller, _game, _vision, _inputs = make_controller(cycles=1)
+        controller._aim_gain = 0.60
+        controller._last_aim = (0.30, 200)
+        plan = ExplorePlan(keys=[], hold_s=0.2, aim_norm=0.05, action="stop")
+        controller._adapt_aim(plan)
+        self.assertGreater(controller._aim_gain, 0.60)
+
+        controller._aim_gain = 0.60
+        controller._last_aim = (0.30, 200)
+        plan = ExplorePlan(keys=[], hold_s=0.2, aim_norm=0.45, action="stop")
+        controller._adapt_aim(plan)
+        self.assertLess(controller._aim_gain, 0.60)
 
     def test_full_cycle_with_explore(self):
         controller, game, vision, inputs = make_controller(cycles=1)

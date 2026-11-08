@@ -123,6 +123,11 @@ class AfkController:
         self._chest_ready_at = 0.0
         self._interact_sig: tuple[int, ...] | None = None
         self._noise = CameraNoise(self.rng, self.cfg.turn)
+        # Live aiming gain. Not a calibration constant: it is nudged by what the
+        # last turn actually did to Jev's target box, so an unknown or changing
+        # mouse sensitivity only changes the convergence speed.
+        self._aim_gain = self.cfg.turn.gain
+        self._last_aim: tuple[float, int] | None = None
         self._leaving_intent = False
         self._last_cloud_check = 0.0
         self._held_move: set[str] = set()
@@ -611,6 +616,7 @@ class AfkController:
 
         plan = plan_explore(obs, self.cfg, self.rng,
                             chest_ready=now >= self._chest_ready_at)
+        self._adapt_aim(plan)
         # An interact that changed nothing on screen means we were out of range
         # (or facing the wrong thing). Trusting the model again would press E
         # forever, so override the next plan with "walk closer".
@@ -630,6 +636,31 @@ class AfkController:
             self._interact_sig = signature
         self._last_move = plan.action or plan.move
         self._last_signature = signature
+
+    def _adapt_aim(self, plan) -> None:
+        """React to whether the last turn actually helped.
+
+        No absolute sensitivity is assumed. If the target moved closer to the
+        centre the gain creeps up; if it did not, the gain is cut. The next
+        decision re-reads the target, so a wrong gain costs one frame of
+        convergence, never a lost target.
+        """
+        if self._last_aim is None:
+            return
+        before, turn = self._last_aim
+        self._last_aim = None
+        if not plan.aim_norm or abs(turn) < 30 or abs(before) < 0.05:
+            return
+        err_before, err_after = abs(before), abs(plan.aim_norm)
+        old = self._aim_gain
+        if err_after < err_before * 0.80:
+            self._aim_gain = min(0.90, self._aim_gain * 1.10)
+        elif err_after > err_before * 1.02:
+            # Overshot, or the game needs much less mouse than we gave it.
+            self._aim_gain = max(0.12, self._aim_gain * 0.55)
+        if abs(self._aim_gain - old) > 1e-3:
+            log.info("aim gain %.2f -> %.2f (target %.3f -> %.3f)",
+                     old, self._aim_gain, err_before, err_after)
 
     def _turn_by(self, dx_px: int) -> None:
         """Turn in many small eased mouse steps instead of one snap.
@@ -654,11 +685,22 @@ class AfkController:
 
     def _execute_plan(self, plan, now: float) -> None:
         """Turn one Jev plan into inputs, honouring operation/hold/repeat/continuous."""
-        # Look first, then move: aiming at the object before walking to it is
-        # both more human and what keeps the chest centred for the next frame.
+        aim_dx = 0
         if plan.aim_norm and self.last_frame is not None:
-            self._turn_by(aim_px(0.5 + plan.aim_norm, self.last_frame.width,
-                                 self.cfg.turn))
+            aim_dx = aim_px(0.5 + plan.aim_norm, self.last_frame.width,
+                            self.cfg.turn, gain=self._aim_gain)
+            self._last_aim = (plan.aim_norm, aim_dx)
+
+        # Real players rarely stand still to turn: the movement keys go down
+        # first, then the camera swings while the character is already walking.
+        # Discontinuous actions (interact / jump / click / discrete taps) keep
+        # the old order, because those need a stable base.
+        walking = bool(plan.keys and plan.continuous and not plan.interact
+                       and not plan.jump and not plan.mouse)
+        if walking:
+            self._set_movement(plan.keys, now)
+        if aim_dx:
+            self._turn_by(aim_dx)
 
         if plan.mouse:
             self._release_movement()

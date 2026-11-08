@@ -477,6 +477,8 @@ def run_jev(hwnd: int, inputs, capture: ScreenCapture, cfg, out_dir: Path, log: 
     rng = random.Random()
     state["model"] = cfg.model
     noise = CameraNoise(rng, cfg.turn)
+    aim_gain = cfg.turn.gain
+    last_aim: tuple[float, int] | None = None
 
     last_interact_at = -999.0
     last_interact_sig: tuple[int, ...] | None = None
@@ -520,6 +522,19 @@ def run_jev(hwnd: int, inputs, capture: ScreenCapture, cfg, out_dir: Path, log: 
                                hold_label="medium", continuous=True, aim_norm=0.0,
                                reason="interact had no effect -> advance")
         plan_line = describe(plan)
+        # Same self-correcting gain as the controller: react to whether the last
+        # turn actually pulled the target toward the centre.
+        if last_aim is not None:
+            before, turn = last_aim
+            last_aim = None
+            if plan.aim_norm and abs(turn) >= 30 and abs(before) >= 0.05:
+                err_before, err_after = abs(before), abs(plan.aim_norm)
+                if err_after < err_before * 0.80:
+                    aim_gain = min(0.90, aim_gain * 1.10)
+                elif err_after > err_before * 1.02:
+                    aim_gain = max(0.12, aim_gain * 0.55)
+                log(f"[{step}] aim gain -> {aim_gain:.2f} "
+                    f"(target {err_before:.3f} -> {err_after:.3f})")
         log(f"[{step}] {mmss(time.monotonic() - t_run)} title={title_before} "
             f"plan={plan_line} | {plan.reason}")
 

@@ -134,7 +134,8 @@ class CameraNoise:
         return int(round(dx)), int(round(dy))
 
 
-def aim_px(center_norm: float, frame_width: int, cfg: TurnConfig = TurnConfig()) -> int:
+def aim_px(center_norm: float, frame_width: int, cfg: TurnConfig = TurnConfig(),
+           gain: float | None = None) -> int:
     """Pixels to move the mouse so a target at normalized x lands on screen centre.
 
     ``center_norm`` is 0..1 with 0 at the left edge; positive means "turn
@@ -144,6 +145,11 @@ def aim_px(center_norm: float, frame_width: int, cfg: TurnConfig = TurnConfig())
     chasing those is what makes a bot jitter at a target it already faces.
     The final clamp to ``max_step_px`` bounds a single decision so a bad box
     from the detector cannot throw the view across the map.
+
+    ``gain`` lets the caller supply a live, self-correcting gain instead of the
+    configured constant: the loop re-reads the target position every decision,
+    so an unknown (or changing) mouse sensitivity only affects how fast the
+    target converges, never whether it does.
     """
     if frame_width <= 0:
         return 0
@@ -151,7 +157,8 @@ def aim_px(center_norm: float, frame_width: int, cfg: TurnConfig = TurnConfig())
     # Convert screen pixels to mouse pixels for this game's sensitivity. With
     # px_per_screen < 1 the same mouse movement turns further, so the demand
     # shrinks; with > 1 the game is sluggish and the demand grows.
-    px = offset * float(cfg.gain) * float(cfg.px_per_screen)
+    effective_gain = float(cfg.gain if gain is None else gain)
+    px = offset * effective_gain * float(cfg.px_per_screen)
     if abs(px) <= float(cfg.deadzone_px):
         return 0
     limit = int(round(cfg.max_step_px))
