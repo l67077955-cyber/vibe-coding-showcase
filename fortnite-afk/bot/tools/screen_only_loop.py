@@ -124,19 +124,21 @@ def main(argv: list[str] | None = None) -> int:
     last_interact_at = -999.0
     last_aim: tuple[float, int] | None = None
     last_sig: tuple[int, ...] = ()
+    stuck = 0
+    no_turn = 0
+    turn_scale = 1.0
     started = time.monotonic()
 
     if args.focus_game:
-        # Keyboard events follow the foreground window. Alt+Tab is the only
-        # focus command that does not need an HWND, so the loop can put the
-        # game in front itself instead of typing into whatever launched it.
-        inputs.key_down("alt")
-        time.sleep(0.05)
-        inputs.press("tab", 0.08)
-        time.sleep(0.05)
-        inputs.key_up("alt")
-        time.sleep(1.2)
-        print("focus: sent Alt+Tab so the game owns the keyboard")
+        # Never Alt+Tab blindly: it lands on whatever window Windows remembers
+        # and can put the terminal in front, where the keys go to a console.
+        # Ask the person to click the game once instead; no window handles and
+        # no guessing.
+        print("focus: click the game window now - starting in 8 seconds")
+        for left in range(8, 0, -1):
+            print(f"  {left}...", end="\r", flush=True)
+            time.sleep(1.0)
+        print("focus: starting; every key now goes to the foreground window")
 
     try:
         index = 0
@@ -188,6 +190,62 @@ def main(argv: list[str] | None = None) -> int:
                         aim_gain = min(0.90, aim_gain * 1.10)
                     elif abs(plan.aim_norm) > abs(before) * 1.02:
                         aim_gain = max(0.12, aim_gain * 0.55)
+
+            # Stuck against geometry: the frame stops changing while the plan
+            # keeps walking. Back out, hop, and sweep the camera - without this
+            # the bot grinds into a wall forever and never turns.
+            moving = bool(plan.keys or plan.interact or plan.jump or plan.mouse)
+            if similarity is not None and similarity >= 0.985 and moving:
+                stuck += 1
+            else:
+                stuck = 0
+            if stuck >= 2:
+                stuck = 0
+                no_turn = 0
+                print("       stuck: backing out, jumping, scanning")
+                if args.act:
+                    for key in list(held):
+                        inputs.key_up(key)
+                    held.clear()
+                    inputs.hold(["s"], 0.5)
+                    inputs.press("space", 0.08)
+                    inputs.hold(["d"], 0.35)
+                    direction = 1 if index % 2 else -1
+                    for delta in plan_turn(int(direction * 320 * turn_scale), cfg.turn):
+                        nx, ny = noise.step(cfg.turn.tick_s)
+                        inputs.move_relative(delta + nx, ny)
+                        time.sleep(cfg.turn.tick_s)
+                steps.append({"index": index, "time": round(stamp_t, 1),
+                              "luma": round(luma, 1), "api_s": round(api_s, 2),
+                              "screen": obs.screen, "action_conf": round(action_conf, 3),
+                              "similarity": similarity, "keys": ["s", "d"],
+                              "interact": False, "jump": True, "aim": 0.0, "aim_y": 0.0,
+                              "plan": "stuck-escape + 320px scan",
+                              "reason": "frame unchanged while moving"})
+                continue
+
+            # No target and no turn for a while: look around instead of
+            # marching at the same wall forever.
+            if plan.aim_norm or plan.aim_norm_y or plan.look_dx:
+                no_turn = 0
+            else:
+                no_turn += 1
+            if no_turn >= 6:
+                no_turn = 0
+                direction = 1 if index % 2 else -1
+                print(f"       scan: no target for 6 steps, turning {direction * 280:+d}px")
+                if args.act:
+                    for delta in plan_turn(int(direction * 280 * turn_scale), cfg.turn):
+                        nx, ny = noise.step(cfg.turn.tick_s)
+                        inputs.move_relative(delta + nx, ny)
+                        time.sleep(cfg.turn.tick_s)
+                    probe = capture.grab(rect)
+                    turned = signature_similarity(sig, frame_signature(probe))
+                    if turned > 0.995:
+                        turn_scale = min(4.0, turn_scale * 1.5)
+                    elif turned < 0.90:
+                        turn_scale = max(0.8, turn_scale * 0.85)
+                    print(f"       turn_scale -> {turn_scale:.2f} (view change {turned:.3f})")
 
             if args.act:
                 if plan.interact:
