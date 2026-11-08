@@ -104,6 +104,10 @@ class SafetyConfig:
 @dataclass
 class ExploreConfig:
     enabled: bool = True
+    # The model is often only ~0.2 confident in a first-person scene. A 0.25
+    # gate threw those answers away and turned every decision into a blind
+    # "move_forward"; 0.12 keeps real (if cautious) choices.
+    min_action_conf: float = 0.12
     interval_s: tuple[float, float] = (2.5, 4.0)
     move_hold_s: tuple[float, float] = (0.45, 0.9)
     interact_key: str = "e"

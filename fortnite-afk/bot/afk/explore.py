@@ -362,7 +362,7 @@ def _plan_action(obs: Observation, cfg: Config, rng: random.Random, *,
     if action == "interact" and not (target_is_object and target_near and interact_ready >= 0.40):
         action = "move_forward"
         reason = "interact without a near target -> walk forward"
-    if action_conf < 0.25:
+    if action_conf < cfg.explore.min_action_conf:
         action = "move_forward"
         action_conf = 0.0
         reason = "low confidence -> forward"
