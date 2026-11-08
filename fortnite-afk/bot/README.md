@@ -340,6 +340,31 @@ python tools\screen_only_loop.py --region 0,0,1600,900 --act # 真的发按键
 
 > GDI 截图必然要一个屏幕 DC（`GetDC(NULL)`），用完立即 `ReleaseDC`；这不是游戏窗口句柄，也不指向游戏进程。
 
+### 4.6 点击位置只来自 Jev，没有硬编码坐标
+
+大厅、岛屿页、模式选择、加载页的按钮位置都不一样，写死坐标迟早点错。`tools/auto_start.py` 的做法是每帧问 Jev 三个问题：
+
+- `screen`：这是大厅 / 岛屿页 / 准备页 / 排队 / 对局 / 其他
+- `target_action`：现在做什么最接近进局（play / select / start / back / wait）
+- `target_button`：按钮的 Box
+
+代码只做一件事：点这个 Box 的中心。**没有 `click(214,711)` 这种常量，也没有按颜色/区域猜按钮的兜底**——模型指不出来就不点。
+
+实测（dry-run，不点击）：
+
+```
+[01] screen=lobby(0.92) action=play(0.81) box=yes
+       -> would click play at (232,751)
+```
+
+需要真点时加 `--act`：
+
+```powershell
+python tools\auto_start.py --act --move-seconds 6 --steps 8
+```
+
+进局后它会按 `W` / `W+D` / `W+A` / `W` 连续走 6 秒，证明角色真的能动。
+
 ## 5. 延迟与动作自然感（v3）
 
 ### 5.1 延迟：5.7 秒 → 2.0 秒

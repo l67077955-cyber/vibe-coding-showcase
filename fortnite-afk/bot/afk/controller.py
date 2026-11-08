@@ -332,7 +332,10 @@ class AfkController:
         if self.last_frame is None:
             return False
         box = self._box(obs, name)
+        conf = 0.0
         if box is None:
+            # No coordinates, no colour heuristics, no fallback area: if the
+            # model cannot point at the button, nothing is clicked.
             return False
         _, conf = obs.raw_box(name)
         x, y = box_center_screen(box, self.last_frame.rect)
