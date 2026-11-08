@@ -92,6 +92,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--act", action="store_true",
                    help="actually send keys/mouse (default: dry run, log only)")
     p.add_argument("--save-every", type=int, default=1, help="save every Nth frame")
+    p.add_argument("--focus-game", action="store_true",
+                   help="send one Alt+Tab at start so the game owns the keyboard; "
+                        "this build never asks for a window handle")
     p.add_argument("--out", default="")
     args = p.parse_args(argv)
 
@@ -123,8 +126,21 @@ def main(argv: list[str] | None = None) -> int:
     last_sig: tuple[int, ...] = ()
     started = time.monotonic()
 
+    if args.focus_game:
+        # Keyboard events follow the foreground window. Alt+Tab is the only
+        # focus command that does not need an HWND, so the loop can put the
+        # game in front itself instead of typing into whatever launched it.
+        inputs.key_down("alt")
+        time.sleep(0.05)
+        inputs.press("tab", 0.08)
+        time.sleep(0.05)
+        inputs.key_up("alt")
+        time.sleep(1.2)
+        print("focus: sent Alt+Tab so the game owns the keyboard")
+
     try:
         index = 0
+        end_streak = 0
         while args.steps == 0 or index < args.steps:
             index += 1
             frame = capture.grab(rect)
@@ -240,6 +256,15 @@ def main(argv: list[str] | None = None) -> int:
             })
             if args.interval > 0:
                 time.sleep(args.interval)
+
+            # Stop when the match is over instead of burning steps in a lobby.
+            if obs.screen in ("eliminated", "results", "lobby"):
+                end_streak += 1
+                if end_streak >= 2:
+                    print(f"match over: screen={obs.screen}; stopping")
+                    break
+            else:
+                end_streak = 0
     except KeyboardInterrupt:
         print("\nstopped by user")
     finally:
