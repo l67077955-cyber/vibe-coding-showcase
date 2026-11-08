@@ -342,10 +342,22 @@ class Session:
                 else:
                     self.no_move = 0
                 if self.no_move >= 3:
-                    print("        WARNING: keys are held but the frame is not changing.")
-                    print("        WARNING: the game is probably not the foreground window;")
-                    print("        WARNING: click it once, then leave the keyboard alone.")
+                    # Typing into whatever else is focused is worse than doing
+                    # nothing: release everything and wait until the picture
+                    # changes (i.e. the person went back to the game).
+                    print("        input paused: keys are held but the frame is frozen.")
+                    print("        click the game window to resume; nothing is being sent.")
+                    self.release()
+                    self.prev = None
+                    baseline = frame_signature(frame)
+                    for _ in range(30):
+                        time.sleep(1.0)
+                        probe = self.capture.grab(self.rect)
+                        if signature_similarity(baseline, frame_signature(probe)) < 0.98:
+                            print("        screen changed again; resuming")
+                            break
                     self.no_move = 0
+                    continue
                 record.update({"cycle": cycle, "judge": where,
                                "judge_conf": round(conf, 3)})
                 self.steps.append(record)
