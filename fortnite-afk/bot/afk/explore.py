@@ -72,6 +72,10 @@ class ExplorePlan:
     # (-0.5 .. +0.5). The controller converts it to pixels and turns with the
     # eased profile, so the camera aims at the chest instead of snapping.
     aim_norm: float = 0.0
+    # Same idea on the vertical axis: positive means the target is below the
+    # crosshair, so the camera should tilt down. Without this the bot only ever
+    # turned left/right.
+    aim_norm_y: float = 0.0
 
 
 def frame_signature(frame) -> tuple[int, ...]:
@@ -222,10 +226,12 @@ def _plan_action(obs: Observation, cfg: Config, rng: random.Random, *,
     target_near = (target_distance == "near" and (distance_conf >= 0.40 or target_big)) or target_big
 
     aim_norm = 0.0
+    aim_norm_y = 0.0
     if target_box is not None and target_visible >= cfg.explore.chest_min_presence:
         # Aim at the object's centre. Full 0.5 offset would mean "turn half a
         # screen"; aim_px() turns it into a bounded, eased mouse movement.
         aim_norm = max(-0.5, min(0.5, target_box.center[0] - 0.5))
+        aim_norm_y = max(-0.5, min(0.5, target_box.center[1] - 0.5))
 
     reason = f"model action {action}"
     if (chest_ready and target_is_object
@@ -290,6 +296,7 @@ def _plan_action(obs: Observation, cfg: Config, rng: random.Random, *,
         target_kind=target_kind,
         continuous=cfg.explore.continuous and action in MOVEMENT_ACTIONS,
         aim_norm=aim_norm,
+        aim_norm_y=aim_norm_y,
     )
 
 

@@ -167,6 +167,17 @@ def aim_px(center_norm: float, frame_width: int, cfg: TurnConfig = TurnConfig(),
     return max(-limit, min(limit, int(round(px))))
 
 
+def aim_py(center_norm: float, frame_height: int, cfg: TurnConfig = TurnConfig(),
+           gain: float | None = None) -> int:
+    """Vertical twin of aim_px.
+
+    Positive means look down (the target sits below the crosshair), matching
+    the sign of raw mouse-dy. Gain, deadzone and clamp are shared with the
+    horizontal path so the two axes cannot drift apart.
+    """
+    return aim_px(center_norm, frame_height, cfg, gain=gain)
+
+
 def plan_turn(dx_px: int, cfg: TurnConfig = TurnConfig()) -> list[int]:
     """Split one turn into per-tick mouse deltas with a smooth speed profile.
 

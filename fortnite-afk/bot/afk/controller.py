@@ -14,7 +14,7 @@ from .config import APP_DIR, Config, config_summary
 from .explore import describe, frame_signature, plan_explore, signature_similarity
 from .geometry import Box, Rect, box_center_screen
 from .jev import JevError, Observation
-from .motion import CameraNoise, aim_px, jitter, plan_turn, turn_duration
+from .motion import CameraNoise, aim_px, aim_py, jitter, plan_turn, turn_duration
 from .win32 import InputController, key_is_down
 from . import cloud
 
@@ -648,34 +648,42 @@ class AfkController:
             log.info("aim gain %.2f -> %.2f (target %.3f -> %.3f)",
                      old, self._aim_gain, err_before, err_after)
 
-    def _turn_by(self, dx_px: int) -> None:
+    def _turn_by(self, dx_px: int, dy_px: int = 0) -> None:
         """Turn in many small eased mouse steps instead of one snap.
 
         A 300 px jump in a single SendInput lands as an instant camera whip;
         the same 300 px spread over ~24 ticks eases in and out like a hand
         moving a mouse. `smooth_turn=false` restores the old one-shot move.
         """
-        if not dx_px:
+        if not dx_px and not dy_px:
             return
         if not self.cfg.explore.smooth_turn:
             nx, ny = self._noise.step(0.05)
-            self.inputs.move_relative(dx_px + nx, ny)
+            self.inputs.move_relative(dx_px + nx, dy_px + ny)
             return
-        steps = plan_turn(dx_px, self.cfg.turn)
-        for delta in steps:
+        steps_x = plan_turn(dx_px, self.cfg.turn) if dx_px else []
+        steps_y = plan_turn(dy_px, self.cfg.turn) if dy_px else []
+        count = max(len(steps_x), len(steps_y))
+        for i in range(count):
+            sx = steps_x[i] if i < len(steps_x) else 0
+            sy = steps_y[i] if i < len(steps_y) else 0
             nx, ny = self._noise.step(self.cfg.turn.tick_s)
-            self.inputs.move_relative(delta + nx, ny)
+            self.inputs.move_relative(sx + nx, sy + ny)
             self._sleep(jitter(self.cfg.turn.tick_s, self.rng, 0.20))
-        log.debug("turn %+d px over %d ticks (%.2fs)", dx_px, len(steps),
-                  turn_duration(steps, self.cfg.turn))
+        log.debug("turn %+d px / %+d px over %d ticks", dx_px, dy_px, count)
 
     def _execute_plan(self, plan, now: float) -> None:
         """Turn one Jev plan into inputs, honouring operation/hold/repeat/continuous."""
         aim_dx = 0
-        if plan.aim_norm and self.last_frame is not None:
-            aim_dx = aim_px(0.5 + plan.aim_norm, self.last_frame.width,
-                            self.cfg.turn, gain=self._aim_gain)
-            self._last_aim = (plan.aim_norm, aim_dx)
+        aim_dy = 0
+        if (plan.aim_norm or plan.aim_norm_y) and self.last_frame is not None:
+            if plan.aim_norm:
+                aim_dx = aim_px(0.5 + plan.aim_norm, self.last_frame.width,
+                                self.cfg.turn, gain=self._aim_gain)
+                self._last_aim = (plan.aim_norm, aim_dx)
+            if plan.aim_norm_y:
+                aim_dy = aim_py(0.5 + plan.aim_norm_y, self.last_frame.height,
+                                self.cfg.turn, gain=self._aim_gain)
 
         # Real players rarely stand still to turn: the movement keys go down
         # first, then the camera swings while the character is already walking.
@@ -685,8 +693,8 @@ class AfkController:
                        and not plan.jump and not plan.mouse)
         if walking:
             self._set_movement(plan.keys, now)
-        if aim_dx:
-            self._turn_by(aim_dx)
+        if aim_dx or aim_dy:
+            self._turn_by(aim_dx, aim_dy)
 
         if plan.mouse:
             self._release_movement()

@@ -43,6 +43,20 @@ class SimulationTests(unittest.TestCase):
     def tearDown(self):
         logging.disable(logging.NOTSET)
 
+    def test_vertical_aim_moves_the_mouse_down(self):
+        """The camera must tilt as well as pan: dy has to be non-zero."""
+        controller, _game, _vision, inputs = make_controller(cycles=1)
+        controller.cfg.turn.noise = False
+        controller.last_frame = Frame(width=768, height=432, rgb=None,
+                                      rect=Rect(0, 0, 768, 432), scale=1.0,
+                                      captured_at=0.0)
+        plan = ExplorePlan(keys=[], hold_s=0.2, aim_norm_y=0.30, action="stop")
+        inputs.actions.clear()
+        controller._execute_plan(plan, now=0.0)
+        looks = [a for a in inputs.actions if a[0] == "look"]
+        self.assertTrue(looks)
+        self.assertGreater(sum(a[1][1] for a in looks), 0)
+
     def test_smooth_turn_is_many_small_steps(self):
         """One decision must not whip the camera in a single 300 px jump."""
         controller, _game, _vision, inputs = make_controller(cycles=1)

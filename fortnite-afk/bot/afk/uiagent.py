@@ -14,8 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-UI_START_QUESTIONS: dict[str, Any] = {
-    "screen": {
+UI_START_QUESTIONS: dict[str, Any] = {    "screen": {
         "type": "choice",
         "instructions": (
             "What screen is this? Judge from the whole image, including any "
@@ -55,5 +54,37 @@ UI_START_QUESTIONS: dict[str, Any] = {
     "target_button_visible": {
         "type": "noul",
         "instructions": "Is that button actually visible and clickable right now?",
+    },
+}
+
+DROP_QUESTIONS: dict[str, Any] = {
+    "phase": {
+        "type": "choice",
+        "instructions": (
+            "Which phase of the drop is the player in? Look at the whole screen: "
+            "the battle bus, free-fall, a glider, or standing on the ground."
+        ),
+        "criteria": {
+            "bus": "On the battle bus / flying vehicle with a JUMP prompt and a minimap of the island.",
+            "skydive": "Free-falling: the camera is high above the ground, no glider.",
+            "glide": "Gliding down: a glider or parachute is visible.",
+            "ground": "Standing on the ground: terrain at eye level, weapons visible.",
+            "other": "Loading, lobby, death screen, or anything else.",
+        },
+    },
+    "drop_now": {
+        "type": "noul",
+        "instructions": (
+            "Is this a good moment to jump? The island should be close ahead or below, "
+            "not still tiny on the horizon."
+        ),
+    },
+    "landing_area": {
+        "type": "box",
+        "instructions": "A clear patch of ground ahead/below to steer toward.",
+    },
+    "landing_area_visible": {
+        "type": "noul",
+        "instructions": "Is a clear landing area visible?",
     },
 }

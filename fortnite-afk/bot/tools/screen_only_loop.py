@@ -45,7 +45,7 @@ from afk.config import load_config  # noqa: E402
 from afk.explore import describe, plan_explore  # noqa: E402
 from afk.geometry import Rect  # noqa: E402
 from afk.jev import JevClient, JevError, TransportError  # noqa: E402
-from afk.motion import CameraNoise, aim_px, plan_turn  # noqa: E402
+from afk.motion import CameraNoise, aim_px, aim_py, plan_turn  # noqa: E402
 from afk.screens import questions_for  # noqa: E402
 from afk.win32 import InputController, enable_dpi_awareness  # noqa: E402
 
@@ -187,12 +187,23 @@ def main(argv: list[str] | None = None) -> int:
                     held.clear()
                     inputs.hold(list(plan.keys), min(plan.hold_s, 1.2))
 
-                if plan.aim_norm:
-                    turn_px = aim_px(0.5 + plan.aim_norm, frame.width, cfg.turn, gain=aim_gain)
-                    last_aim = (plan.aim_norm, turn_px)
-                    for delta in plan_turn(turn_px, cfg.turn):
+                if plan.aim_norm or plan.aim_norm_y:
+                    turn_px = 0
+                    turn_py = 0
+                    if plan.aim_norm:
+                        turn_px = aim_px(0.5 + plan.aim_norm, frame.width,
+                                         cfg.turn, gain=aim_gain)
+                        last_aim = (plan.aim_norm, turn_px)
+                    if plan.aim_norm_y:
+                        turn_py = aim_py(0.5 + plan.aim_norm_y, frame.height,
+                                         cfg.turn, gain=aim_gain)
+                    steps_x = plan_turn(turn_px, cfg.turn) if turn_px else []
+                    steps_y = plan_turn(turn_py, cfg.turn) if turn_py else []
+                    for i in range(max(len(steps_x), len(steps_y))):
+                        sx = steps_x[i] if i < len(steps_x) else 0
+                        sy = steps_y[i] if i < len(steps_y) else 0
                         nx, ny = noise.step(cfg.turn.tick_s)
-                        inputs.move_relative(delta + nx, ny)
+                        inputs.move_relative(sx + nx, sy + ny)
                         time.sleep(cfg.turn.tick_s)
                 elif plan.keys and plan.continuous:
                     nx, ny = noise.step(0.10)

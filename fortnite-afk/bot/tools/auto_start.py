@@ -31,6 +31,7 @@ if str(ROOT) not in sys.path:
 from afk import cloud  # noqa: E402
 from afk.capture import ScreenCapture  # noqa: E402
 from afk.config import load_config  # noqa: E402
+from afk.explore import frame_signature, signature_similarity  # noqa: E402
 from afk.geometry import Rect, box_center_screen  # noqa: E402
 from afk.jev import JevClient, JevError, TransportError  # noqa: E402
 from afk.uiagent import UI_START_QUESTIONS  # noqa: E402
@@ -75,14 +76,23 @@ def main(argv: list[str] | None = None) -> int:
     print()
 
     try:
-        for index in range(1, args.steps + 1):
+        index = 0
+        black_streak = 0
+        queue_waits = 0
+        while index < args.steps:
+            index += 1
             frame = capture.grab(rect)
             frame.save_png(out_dir / f"step_{index:02d}.png")
             if cloud.mean_luma(frame) < cfg.cloud.black_frame_min_luma:
-                print(f"[{index:02d}] black frame; waking the display")
+                black_streak += 1
+                print(f"[{index:02d}] black frame ({black_streak}); waiting for the load")
                 inputs.move_relative(40, 20)
-                time.sleep(1.0)
+                time.sleep(2.0)
+                index -= 1  # loading does not consume a decision
+                if black_streak > 20:
+                    break
                 continue
+            black_streak = 0
 
             try:
                 obs = client.ask(frame, UI_START_QUESTIONS, context=CONTEXT)
@@ -106,9 +116,19 @@ def main(argv: list[str] | None = None) -> int:
                            round(box.right, 3), round(box.bottom, 3)],
                           "png": f"step_{index:02d}.png"})
 
-            if screen == "match" or (screen == "queue" and action in ("wait", "none")):
-                in_match = screen == "match"
+            if screen == "match":
+                in_match = True
                 break
+            if screen == "queue" and action in ("wait", "none"):
+                # Matchmaking can take a minute or two. Waiting is progress, so
+                # it must not consume a decision step.
+                print("       queueing; waiting for a match")
+                time.sleep(4.0)
+                index -= 1
+                queue_waits += 1
+                if queue_waits > 25:
+                    break
+                continue
             if action in ("wait", "none") or box is None:
                 time.sleep(1.2)
                 continue
@@ -116,12 +136,34 @@ def main(argv: list[str] | None = None) -> int:
             x, y = box_center_screen(box, rect)
             print(f"       -> {'click' if args.act else 'would click'} "
                   f"{action} at ({x},{y})")
-            inputs.click(x, y)
-            time.sleep(2.6)
-            if index == 2:
-                # the first click only activates an inactive window on Windows
-                inputs.click(x, y)
-                time.sleep(2.0)
+            if not args.act:
+                time.sleep(1.0)
+                continue
+
+            # A click on an inactive window is sometimes consumed by the
+            # activation itself, and the model's box can sit a few pixels above
+            # the label. Try three heights inside the model's own box, then
+            # re-ask, instead of trusting a single event or a fixed coordinate.
+            before = frame_signature(frame)
+            changed = False
+            xs, ys = box_center_screen(box, rect)
+            box_h = max(6, int(box.height * rect.height))
+            for attempt, dy in enumerate((0, int(box_h * 0.25), int(box_h * 0.35)), 1):
+                inputs.click(xs, min(rect.bottom - 1, ys + dy))
+                time.sleep(1.2)
+                probe = capture.grab(rect)
+                if cloud.mean_luma(probe) < cfg.cloud.black_frame_min_luma:
+                    # Loading screens go black; that is success, not failure.
+                    print(f"          attempt {attempt}: black frame (loading)")
+                    changed = True
+                    break
+                similarity = signature_similarity(before, frame_signature(probe))
+                print(f"          attempt {attempt}: screen similarity {similarity:.3f}")
+                if similarity < 0.995:
+                    changed = True
+                    break
+            if not changed:
+                print("          three clicks changed nothing; re-asking the model")
 
         if in_match and args.move_seconds > 0:
             print(f"[move] walking for {args.move_seconds:.0f}s")
