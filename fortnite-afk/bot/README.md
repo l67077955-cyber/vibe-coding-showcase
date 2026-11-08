@@ -348,6 +348,26 @@ FORWEB chest | OPENED           已开
 
 ---
 
+### 4.5 无句柄模式：只截屏 + SendInput
+
+如果连窗口句柄都不允许碰（反作弊/合规场景），用 `tools/screen_only_loop.py`：
+
+```powershell
+python tools\screen_only_loop.py --dry-run --steps 6        # 只看，不发按键
+python tools\screen_only_loop.py --region 0,0,1600,900 --act # 真的发按键
+```
+
+它只做两件事：
+
+- 用 `GetDC(NULL)` + `BitBlt` 截整屏或 `--region` 指定区域；
+- 用 `SendInput` 发键盘鼠标（`InputController`）。
+
+明确不做：`FindWindow` / `EnumWindows`、读 client rect、检查前台、`OpenProcess`、读内存、`PostMessage`（它按定义需要 HWND）。黑屏（平均亮度 < 3）直接跳过，不送模型。
+
+实测：`logs/screen_only/browser_demo/decisions.json`，整屏 1600×900，2 步，第 2 步 Jev 认出 `target=chest/near, aim=+0.20`，全程没有取任何窗口句柄。
+
+> GDI 截图必然要一个屏幕 DC（`GetDC(NULL)`），用完立即 `ReleaseDC`；这不是游戏窗口句柄，也不指向游戏进程。
+
 ## 5. 延迟与动作自然感（v3）
 
 ### 5.1 延迟：5.7 秒 → 2.0 秒
